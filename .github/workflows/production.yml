@@ -1,0 +1,22 @@
+name: Build and deploy
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+
+jobs:
+  build-and-run-containers:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v3
+      - name: Upload files to production server
+        uses: ./.github/actions/build-and-run-containers
+        with:
+          USER: ${{ vars.USER }}
+          SERVER: ${{ vars.SERVER }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}

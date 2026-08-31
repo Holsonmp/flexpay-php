@@ -1,0 +1,34 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Holduix\FlexPay\Checkout\Support\AssetPublisher;
+
+$autoload = $GLOBALS['_composer_autoload_path'] ?? dirname(__DIR__) . '/vendor/autoload.php';
+if (!is_file($autoload)) {
+    fwrite(STDERR, "FlexPay assets : autoload Composer introuvable.\n");
+    exit(2);
+}
+require $autoload;
+
+$arguments = array_slice($argv, 1);
+$command = $arguments[0] ?? '';
+$target = $arguments[1] ?? '';
+$force = in_array('--force', $arguments, true);
+
+if ($command !== 'publish' || $target === '') {
+    fwrite(STDERR, "Usage : flexpay-assets publish <dossier-cible> [--force]\n");
+    exit(2);
+}
+
+try {
+    $published = (new AssetPublisher())->publish($target, $force);
+    foreach ($published as $file) {
+        fwrite(STDOUT, "Copié : {$file}\n");
+    }
+    exit(0);
+} catch (Throwable $exception) {
+    fwrite(STDERR, $exception->getMessage() . "\n");
+    exit(1);
+}

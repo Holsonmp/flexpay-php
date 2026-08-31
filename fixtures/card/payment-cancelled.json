@@ -1,0 +1,6 @@
+{
+    "_fixture_source": "robustness_only_not_observed",
+    "merchant_reference": "ORDER-2026-0003",
+    "orderNumber": "CARD-CANCELLED-0003",
+    "status": "cancelled"
+}

@@ -1,0 +1,11 @@
+{
+    "_fixture_source": "legacy_fake_mode",
+    "_http_code": 200,
+    "status": "pending",
+    "reference": "ORDER-2026-0001",
+    "orderNumber": "FAKE-MM-ORDER-2026-0001",
+    "phone": "243970000003",
+    "amount": 50,
+    "currency": "USD",
+    "callbackUrl": "https://example.com/payment/callback"
+}

@@ -1,0 +1,8 @@
+{
+    "_fixture_source": "legacy_integration_test",
+    "merchant_reference": "ORDER-2026-0002",
+    "orderNumber": "FAKE-FAILED-ORDER-2026-0002",
+    "status": "failed",
+    "code": "1",
+    "message": "Paiement échoué"
+}

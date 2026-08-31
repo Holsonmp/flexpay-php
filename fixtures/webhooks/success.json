@@ -1,0 +1,8 @@
+{
+    "_fixture_source": "legacy_integration_test",
+    "merchant_reference": "ORDER-2026-0001",
+    "orderNumber": "FAKE-SUCCESS-ORDER-2026-0001",
+    "status": "success",
+    "amount": 50,
+    "currency": "USD"
+}

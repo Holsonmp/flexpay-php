@@ -1,0 +1,9 @@
+/vendor/
+/.phpunit.cache/
+/.phpstan-cache/
+/coverage/
+/.phpunit.result.cache
+/node_modules/
+/coverage.xml
+/examples/plain-php/var/
+/examples/plain-php/public/vendor/

@@ -1,0 +1,10 @@
+{
+    "_fixture_source": "legacy_fake_mode",
+    "_http_code": 200,
+    "status": "pending",
+    "reference": "ORDER-2026-0003",
+    "orderNumber": "FAKE-CARD-ORDER-2026-0003",
+    "payment_url": "https://cardpayment.flexpay.cd/v3/pay?authorization=fixture-redacted",
+    "amount": 50,
+    "currency": "USD"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "holduix-flexpay-checkout-assets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-assets.mjs",
+    "test": "node --test tests/JavaScript/*.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9",
+    "jsdom": "^26.1.0"
+  }
+}
