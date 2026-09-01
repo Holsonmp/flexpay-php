@@ -17,6 +17,7 @@ use Holduix\FlexPay\Checkout\Policy\StatusRefreshPolicy;
 use Holduix\FlexPay\Checkout\Security\CheckoutRedirectValidator;
 use Holduix\FlexPay\Checkout\Support\InMemoryCheckoutStore;
 use Holduix\FlexPay\Config\CheckoutConfiguration;
+use Holduix\FlexPay\Enum\NormalizedPaymentStatus;
 use Holduix\FlexPay\Enum\PaymentMethod;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -26,10 +27,23 @@ final class CheckoutSupportTest extends TestCase
     public function testSessionRoundTripAndPublicViewFilterSensitiveData(): void
     {
         $session = $this->session();
+        $session->setProviderObservation(
+            NormalizedPaymentStatus::REQUIRES_ACTION,
+            'pending',
+            null,
+            'https://cardpayment.flexpay.cd/v3/pay?authorization=server-secret',
+            new DateTimeImmutable('2026-08-31T12:00:01+00:00')
+        );
+        $session->rememberProviderTransactionCandidate(
+            'UNVERIFIED-ORDER-1',
+            new DateTimeImmutable('2026-08-31T12:00:02+00:00')
+        );
+        self::assertArrayNotHasKey('checkout_url', $session->toStorageArray());
         $roundTrip = CheckoutSession::fromStorageArray($session->toStorageArray());
         $public = CheckoutPublicView::fromSession($roundTrip, 4000)->toArray();
 
         self::assertSame($session->id(), $roundTrip->id());
+        self::assertSame('UNVERIFIED-ORDER-1', $roundTrip->providerTransactionCandidate());
         self::assertSame(['mobile_money', 'card'], $public['allowed_methods']);
         self::assertArrayNotHasKey('provider_transaction_id', $public);
         self::assertArrayNotHasKey('checkout_url', $public);

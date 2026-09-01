@@ -57,6 +57,7 @@ function modalWithResponses(responses, overrides = {}) {
     document: dom.window.document,
     fetch,
     autoRedirect: false,
+    allowedRedirectHosts: ["cardpayment.flexpay.cd"],
     setTimeout: () => 1,
     clearTimeout: () => {},
     ...overrides,

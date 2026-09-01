@@ -1,3 +1,4 @@
+/*! FlexPay Intégration By Holsonmp - Holduix | Copyright (c) 2026 Holson Mpangala / Holduix | MIT */
 var FlexPayCheckout = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -183,6 +184,9 @@ var FlexPayCheckout = (() => {
       this.allowedRedirectHosts = (options.allowedRedirectHosts || []).map(
         (host) => String(host).toLowerCase()
       );
+      if (this.allowedRedirectHosts.length === 0 || this.allowedRedirectHosts.some((host) => !/^[a-z0-9.-]+$/i.test(host))) {
+        throw new TypeError("Au moins un h\xF4te de redirection doit \xEAtre explicitement autoris\xE9.");
+      }
       this.polling = {
         initialDelayMs: Math.max(0, Number(options.polling?.initialDelayMs ?? 0)),
         intervalMs: Math.max(250, Number(options.polling?.intervalMs ?? 4e3)),
@@ -391,7 +395,7 @@ var FlexPayCheckout = (() => {
       if (url.protocol !== "https:") {
         throw new TypeError("L\u2019adresse de redirection doit utiliser HTTPS.");
       }
-      if (this.allowedRedirectHosts.length > 0 && !this.allowedRedirectHosts.includes(url.hostname.toLowerCase())) {
+      if (!this.allowedRedirectHosts.includes(url.hostname.toLowerCase())) {
         throw new TypeError("L\u2019h\xF4te de redirection du paiement n\u2019est pas autoris\xE9.");
       }
       return url.toString();

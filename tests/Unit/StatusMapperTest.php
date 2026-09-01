@@ -56,4 +56,26 @@ final class StatusMapperTest extends TestCase
         self::assertSame(NormalizedPaymentStatus::SUCCESSFUL, $mapping->normalizedStatus);
         self::assertSame('approved', $mapping->rawStatus);
     }
+
+    /** @return iterable<string, array{bool|float|string}> */
+    public static function ambiguousSuccessLikeValues(): iterable
+    {
+        yield 'boolean' => [true];
+        yield 'fractional zero' => [0.9];
+        yield 'unpaid' => ['unpaid'];
+        yield 'negated success' => ['not_successful'];
+        yield 'not completed' => ['payment_not_completed'];
+        yield 'message only' => ['Payment successful'];
+    }
+
+    #[DataProvider('ambiguousSuccessLikeValues')]
+    public function testAmbiguousSuccessLikeValuesRemainUnknown(bool|float|string $raw): void
+    {
+        $mapper = new StatusMapper(new DataExtractor());
+        $payload = is_string($raw) && $raw === 'Payment successful'
+            ? ['message' => $raw]
+            : ['status' => $raw];
+
+        self::assertSame(NormalizedPaymentStatus::UNKNOWN, $mapper->map($payload)->normalizedStatus);
+    }
 }

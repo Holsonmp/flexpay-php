@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Support;
@@ -75,6 +83,11 @@ final class Redactor
     private function redactString(string $value): string
     {
         $value = preg_replace('/Bearer\s+[A-Za-z0-9._~+\/-]+=*/i', 'Bearer [REDACTED]', $value) ?? $value;
+        $value = preg_replace(
+            '/((?:authorization|api[_-]?token|token|secret|password|cvv|cvc|pan)\s*[=:]\s*)[^\s&;,]+/i',
+            '$1[REDACTED]',
+            $value
+        ) ?? $value;
         $value = preg_replace_callback(
             '/(?<!\d)\+?\d{10,15}(?!\d)/',
             fn (array $matches): string => $this->maskPhone($matches[0]),

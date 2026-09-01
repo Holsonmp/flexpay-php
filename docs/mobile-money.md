@@ -1,23 +1,34 @@
 # Mobile Money
 
-Pour le parcours complet avec session, polling et reprise, voir [mobile-money-checkout.md](mobile-money-checkout.md).
+## Flux
 
-## Données requises
+1. L’application calcule montant, devise et référence côté serveur.
+2. `RequestValidator` exige un montant positif, une devise ISO à trois lettres, une référence non vide, une callback URL sûre et un téléphone normalisable.
+3. `PhoneNumberNormalizer` retire la présentation et conserve 8 à 15 chiffres ; `+243 970 000 003` devient `243970000003`.
+4. `MobileMoneyService::createPayment()` effectue une seule requête POST. Un timeout est ambigu et ne déclenche aucun retry de création.
+5. Un résultat pending n’est accepté que si un identifiant fournisseur est présent. Un successful d’initiation exige en plus un tuple fournisseur complet et cohérent, puis l’orchestrateur impose une seconde lecture serveur.
+6. L’application conserve la même référence et lit ultérieurement `TransactionService::getStatus()`. Avant tout effet métier, elle compare l’identifiant retourné, la référence, le montant et la devise à sa commande serveur.
 
-Montant positif à deux décimales, code devise de trois lettres, numéro de 8 à 15 chiffres après nettoyage, référence marchande non vide (128 caractères maximum) et callback HTTPS.
+## États testés avec fakes
 
-Le numéro est normalisé comme dans le legacy : tout caractère non numérique est supprimé. Aucun préfixe national n’est ajouté et aucun opérateur n’est déduit.
+- initiation `pending` avec identifiant ;
+- lecture `pending`, puis `successful` corrélé par identifiant, référence, montant et devise ;
+- `failed`, `unknown`, expiration locale, timeout, réseau et JSON invalide ;
+- double initialisation refusée ;
+- polling arrêté sur état terminal.
 
-## Séquence
+Les fixtures prouvent uniquement les valeurs `pending`, `success` et `failed` de leur source historique. Elles ne constituent pas une validation actuelle du fournisseur.
 
-1. L’application persiste une référence unique.
-2. Elle crée `MobileMoneyPaymentRequest`.
-3. Le package émet un POST JSON C2B avec `type=1` et Bearer.
-4. Un résultat accepté contient normalement `providerTransactionId` et un statut pending/successful.
-5. L’application garde l’état local en attente.
-6. Callback ou polling déclenche une lecture serveur.
-7. Montant, devise et référence sont comparés localement avant confirmation.
+```php
+$created = $client->mobileMoney()->createPayment($request);
+if ($created->providerTransactionId !== null) {
+    $status = $client->transactions()->getStatus($created->providerTransactionId);
+    $confirmed = $status->normalizedStatus->value === 'successful'
+        && hash_equals($created->providerTransactionId, (string) $status->providerTransactionId)
+        && hash_equals($request->merchantReference, $status->transactionReference)
+        && abs($status->amount - $request->amount) <= 0.00001
+        && hash_equals(strtoupper($request->currency), $status->currency);
+}
+```
 
-Un timeout de création est ambigu : conservez la référence, vérifiez le statut et ne recréez pas silencieusement le paiement.
-
-Erreurs opérateur, solde insuffisant et numéro refusé n’ont pas été observés dans le dépôt. Ils restent « à vérifier » avec des réponses FlexPay anonymisées.
+Ne recréez pas une transaction après un timeout sans rapprochement par la référence existante.

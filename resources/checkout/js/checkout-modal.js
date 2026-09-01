@@ -1,3 +1,11 @@
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 import { FlexPayCheckoutController } from "./checkout-controller.js";
 import {
   CHECKOUT_EVENTS,

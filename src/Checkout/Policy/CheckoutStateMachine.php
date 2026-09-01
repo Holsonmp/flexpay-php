@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Checkout\Policy;
@@ -30,6 +38,7 @@ final class CheckoutStateMachine
             CheckoutState::CANCELLED,
             CheckoutState::EXPIRED,
             CheckoutState::UNKNOWN,
+            CheckoutState::VERIFYING,
             CheckoutState::COLLECTING_DETAILS,
             CheckoutState::CHOOSING_METHOD,
         ],

@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Checkout;
@@ -30,6 +38,7 @@ final class CheckoutSession
         private ?PaymentMethod $selectedMethod,
         private ?string $rawStatus,
         private ?string $providerTransactionId,
+        private ?string $providerTransactionCandidate,
         private ?string $checkoutUrl,
         private DateTimeImmutable $createdAt,
         private DateTimeImmutable $updatedAt,
@@ -72,6 +81,7 @@ final class CheckoutSession
             $description,
             CheckoutState::CREATED,
             NormalizedPaymentStatus::CREATED,
+            null,
             null,
             null,
             null,
@@ -136,6 +146,11 @@ final class CheckoutSession
     public function providerTransactionId(): ?string
     {
         return $this->providerTransactionId;
+    }
+
+    public function providerTransactionCandidate(): ?string
+    {
+        return $this->providerTransactionCandidate;
     }
 
     public function checkoutUrl(): ?string
@@ -225,17 +240,15 @@ final class CheckoutSession
         ?string $providerTransactionId,
         ?string $checkoutUrl,
         DateTimeImmutable $now,
-        ?DateTimeImmutable $providerOccurredAt = null
+        ?DateTimeImmutable $providerOccurredAt = null,
+        bool $providerWasContacted = true
     ): void {
         $this->normalizedStatus = $status;
         $this->rawStatus = $rawStatus;
-        if ($providerTransactionId !== null && trim($providerTransactionId) !== '') {
-            $this->providerTransactionId = trim($providerTransactionId);
+        // Une URL de redirection est une donnée transitoire : elle ne devient jamais un état persistant.
+        if ($providerWasContacted) {
+            $this->lastProviderRefreshAt = $now;
         }
-        if ($checkoutUrl !== null && trim($checkoutUrl) !== '') {
-            $this->checkoutUrl = trim($checkoutUrl);
-        }
-        $this->lastProviderRefreshAt = $now;
         $this->lastProviderOccurredAt = $providerOccurredAt ?? $this->lastProviderOccurredAt;
         $this->consecutiveNetworkErrors = 0;
         $this->updatedAt = $now;
@@ -259,9 +272,29 @@ final class CheckoutSession
         ++$this->version;
     }
 
+    public function markProviderRefreshStarted(DateTimeImmutable $now): void
+    {
+        $this->lastProviderRefreshAt = $now;
+        $this->updatedAt = $now;
+        ++$this->version;
+    }
+
     public function attachProviderTransactionId(string $providerTransactionId, DateTimeImmutable $now): void
     {
         $this->providerTransactionId = trim($providerTransactionId);
+        $this->providerTransactionCandidate = null;
+        $this->updatedAt = $now;
+        ++$this->version;
+    }
+
+    public function rememberProviderTransactionCandidate(string $providerTransactionId, DateTimeImmutable $now): void
+    {
+        $providerTransactionId = trim($providerTransactionId);
+        if ($providerTransactionId === '' || $providerTransactionId === $this->providerTransactionCandidate) {
+            return;
+        }
+
+        $this->providerTransactionCandidate = $providerTransactionId;
         $this->updatedAt = $now;
         ++$this->version;
     }
@@ -290,7 +323,7 @@ final class CheckoutSession
             'normalized_status' => $this->normalizedStatus->value,
             'raw_status' => $this->rawStatus,
             'provider_transaction_id' => $this->providerTransactionId,
-            'checkout_url' => $this->checkoutUrl,
+            'provider_transaction_candidate' => $this->providerTransactionCandidate,
             'success_url' => $this->successUrl,
             'cancel_url' => $this->cancelUrl,
             'callback_url' => $this->callbackUrl,
@@ -336,7 +369,8 @@ final class CheckoutSession
             is_string($selected) && $selected !== '' ? PaymentMethod::from($selected) : null,
             self::nullableString($data['raw_status'] ?? null),
             self::nullableString($data['provider_transaction_id'] ?? null),
-            self::nullableString($data['checkout_url'] ?? null),
+            self::nullableString($data['provider_transaction_candidate'] ?? null),
+            null,
             new DateTimeImmutable(self::stringValue($data['created_at'] ?? null, 'created_at')),
             new DateTimeImmutable(self::stringValue($data['updated_at'] ?? null, 'updated_at')),
             self::nullableDate($data['expires_at'] ?? null),

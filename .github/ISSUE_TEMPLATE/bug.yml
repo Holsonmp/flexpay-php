@@ -1,0 +1,32 @@
+name: Bug
+description: Signaler un défaut reproductible sans secret ni paiement réel.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Ne publiez aucun token, identifiant marchand, donnée personnelle ou donnée de carte.
+  - type: input
+    id: version
+    attributes:
+      label: Version ou commit
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction minimale avec fake
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportement attendu et observé
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: PHP, Composer et dépendances
+    validations:
+      required: true

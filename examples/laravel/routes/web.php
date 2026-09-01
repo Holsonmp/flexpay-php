@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 use App\Http\Controllers\FlexPayCheckoutController;
@@ -15,6 +23,9 @@ Route::middleware(['auth'])->group(function (): void {
         );
         Route::get('/payments/flexpay/checkouts/{checkoutId}/status', [FlexPayCheckoutController::class, 'status'])
             ->middleware('throttle:flexpay-status');
+        Route::get(
+            '/payments/flexpay/checkouts/{checkoutId}/return',
+            [FlexPayCheckoutController::class, 'paymentReturn']
+        );
     });
 });
-Route::get('/payments/flexpay/checkouts/{checkoutId}/return', [FlexPayCheckoutController::class, 'paymentReturn']);

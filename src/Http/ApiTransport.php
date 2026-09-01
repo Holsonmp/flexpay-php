@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Http;
@@ -79,7 +87,7 @@ final class ApiTransport
 
                 $response = $this->httpClient->sendRequest($request);
                 $duration = (int) round((microtime(true) - $startedAt) * 1000);
-                $this->logResponse($method, $url, $response, $duration, $attempt, $merchantReference, $correlationId);
+                $this->logResponse($method, $baseUrl, $response, $duration, $attempt, $correlationId);
 
                 $mustRetry = $safeToRetry
                     && $attempt < $maximumAttempts
@@ -92,7 +100,7 @@ final class ApiTransport
                 return $this->decodeResponse($response, $merchantReference, $correlationId, $safeToRetry);
             } catch (PsrNetworkExceptionInterface $exception) {
                 if ($safeToRetry && $attempt < $maximumAttempts) {
-                    $this->logRetry($method, $url, $attempt, $merchantReference, $correlationId, $exception);
+                    $this->logRetry($method, $baseUrl, $attempt, $correlationId, $exception);
                     $this->sleepBeforeRetry($attempt);
                     continue;
                 }
@@ -139,19 +147,23 @@ final class ApiTransport
         bool $safeToRetry
     ): HttpResult {
         $statusCode = $response->getStatusCode();
-        $rawBody = trim((string) $response->getBody());
+        $rawBody = trim($this->readBoundedBody($response, $merchantReference, $correlationId));
         $decoded = [];
 
         if ($rawBody !== '') {
             try {
-                $candidate = json_decode($rawBody, true, 512, JSON_THROW_ON_ERROR);
+                $candidate = json_decode($rawBody, true, 32, JSON_THROW_ON_ERROR);
             } catch (JsonException $exception) {
                 throw new InvalidResponseException(
                     'Réponse FlexPay invalide : le corps reçu n’est pas un objet JSON.',
                     httpStatus: $statusCode,
                     correlationId: $correlationId,
                     merchantReference: $merchantReference,
-                    rawResponse: ['body' => mb_substr($rawBody, 0, 500)],
+                    rawResponse: [
+                        'body_length' => strlen($rawBody),
+                        'body_sha256' => hash('sha256', $rawBody),
+                        'content_type' => $response->getHeaderLine('Content-Type'),
+                    ],
                     previous: $exception
                 );
             }
@@ -164,6 +176,7 @@ final class ApiTransport
                 );
             }
             /** @var array<string, mixed> $candidate */
+            $this->assertDecodedResponseBudget($candidate, $merchantReference, $correlationId, $statusCode);
             $decoded = $candidate;
         }
 
@@ -204,10 +217,7 @@ final class ApiTransport
         bool $safeToRetry
     ): never {
         $providerCode = $this->extractor->firstScalar($body, ['code', 'response_code', 'responseCode']);
-        $providerMessage = $this->extractor->firstScalar($body, ['message', 'error', 'messsage']);
-        $message = $providerMessage !== null
-            ? 'FlexPay a refusé la requête : ' . $providerMessage
-            : sprintf('FlexPay a répondu avec le code HTTP %d.', $statusCode);
+        $message = sprintf('FlexPay a répondu avec le code HTTP %d.', $statusCode);
         $arguments = [
             'message' => $message,
             'httpStatus' => $statusCode,
@@ -277,39 +287,134 @@ final class ApiTransport
 
     private function logResponse(
         string $method,
-        string $url,
+        string $baseUrl,
         ResponseInterface $response,
         int $durationMilliseconds,
         int $attempt,
-        ?string $merchantReference,
         string $correlationId
     ): void {
         $this->logger->info('Réponse HTTP FlexPay reçue.', [
             'method' => strtoupper($method),
-            'endpoint' => $url,
+            'provider_host' => (string) parse_url($baseUrl, PHP_URL_HOST),
             'http_status' => $response->getStatusCode(),
             'duration_ms' => $durationMilliseconds,
             'attempt' => $attempt,
-            'merchant_reference' => $merchantReference,
             'correlation_id' => $correlationId,
         ]);
     }
 
     private function logRetry(
         string $method,
-        string $url,
+        string $baseUrl,
         int $attempt,
-        ?string $merchantReference,
         string $correlationId,
         Throwable $exception
     ): void {
         $this->logger->warning('Nouvelle tentative de lecture FlexPay après erreur réseau.', [
             'method' => strtoupper($method),
-            'endpoint' => $url,
+            'provider_host' => (string) parse_url($baseUrl, PHP_URL_HOST),
             'attempt' => $attempt,
-            'merchant_reference' => $merchantReference,
             'correlation_id' => $correlationId,
             'error_type' => $exception::class,
         ]);
+    }
+
+    private function readBoundedBody(
+        ResponseInterface $response,
+        ?string $merchantReference,
+        string $correlationId
+    ): string {
+        $stream = $response->getBody();
+        $maximum = $this->configuration->maxProviderResponseBytes;
+        $size = $stream->getSize();
+        if ($size !== null && $size > $maximum) {
+            throw new InvalidResponseException(
+                'Réponse FlexPay refusée : le corps dépasse la taille autorisée.',
+                httpStatus: $response->getStatusCode(),
+                correlationId: $correlationId,
+                merchantReference: $merchantReference,
+                rawResponse: ['body_length' => $size]
+            );
+        }
+        if ($stream->isSeekable()) {
+            $stream->rewind();
+        }
+
+        $body = '';
+        while (!$stream->eof()) {
+            $remaining = $maximum + 1 - strlen($body);
+            if ($remaining <= 0) {
+                break;
+            }
+            $chunk = $stream->read(min(8192, $remaining));
+            if ($chunk === '') {
+                break;
+            }
+            $body .= $chunk;
+        }
+        if (strlen($body) > $maximum) {
+            throw new InvalidResponseException(
+                'Réponse FlexPay refusée : le corps dépasse la taille autorisée.',
+                httpStatus: $response->getStatusCode(),
+                correlationId: $correlationId,
+                merchantReference: $merchantReference,
+                rawResponse: ['body_length_greater_than' => $maximum]
+            );
+        }
+
+        return $body;
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function assertDecodedResponseBudget(
+        array $payload,
+        ?string $merchantReference,
+        string $correlationId,
+        int $statusCode
+    ): void {
+        $fields = 0;
+        $walk = function (
+            array $values,
+            int $depth
+        ) use (
+            &$walk,
+            &$fields,
+            $merchantReference,
+            $correlationId,
+            $statusCode
+        ): void {
+            if ($depth > 16) {
+                throw new InvalidResponseException(
+                    'Réponse FlexPay refusée : structure trop imbriquée.',
+                    httpStatus: $statusCode,
+                    correlationId: $correlationId,
+                    merchantReference: $merchantReference
+                );
+            }
+            foreach ($values as $key => $value) {
+                ++$fields;
+                if ($fields > 512 || strlen((string) $key) > 256) {
+                    throw new InvalidResponseException(
+                        'Réponse FlexPay refusée : trop de champs.',
+                        httpStatus: $statusCode,
+                        correlationId: $correlationId,
+                        merchantReference: $merchantReference
+                    );
+                }
+                if (is_array($value)) {
+                    $walk($value, $depth + 1);
+                    continue;
+                }
+                if (is_scalar($value) && strlen((string) $value) > 65536) {
+                    throw new InvalidResponseException(
+                        'Réponse FlexPay refusée : valeur trop longue.',
+                        httpStatus: $statusCode,
+                        correlationId: $correlationId,
+                        merchantReference: $merchantReference
+                    );
+                }
+            }
+        };
+        $walk($payload, 0);
     }
 }

@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace App\Repositories;
@@ -40,7 +48,7 @@ final class CodeIgniterCheckoutStore implements CheckoutStoreInterface
             'provider_transaction_id' => $session->providerTransactionId(),
             'status' => $session->normalizedStatus()->value,
             'version' => $session->version(),
-            // En production, chiffrer le payload car l’URL hébergée peut contenir un token.
+            // Appliquer la politique de chiffrement de l’application aux données client persistées.
             'payload_json' => json_encode($payload, JSON_THROW_ON_ERROR),
             'updated_at' => date('Y-m-d H:i:s'),
         ];

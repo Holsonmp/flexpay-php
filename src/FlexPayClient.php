@@ -1,10 +1,19 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay;
 
 use Holduix\FlexPay\Config\FlexPayConfiguration;
+use Holduix\FlexPay\Contracts\HostedCardCheckoutInterface;
 use Holduix\FlexPay\Http\ApiTransport;
 use Holduix\FlexPay\Mapper\StatusMapper;
 use Holduix\FlexPay\Service\CardPaymentService;
@@ -33,7 +42,8 @@ final class FlexPayClient
         ClientInterface $httpClient,
         RequestFactoryInterface $requestFactory,
         StreamFactoryInterface $streamFactory,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface $logger = null,
+        ?HostedCardCheckoutInterface $hostedCardCheckout = null
     ) {
         $logger ??= new NullLogger();
         $redactor = new Redactor();
@@ -61,7 +71,12 @@ final class FlexPayClient
             $extractor,
             $redactor
         );
-        $this->cardPaymentService = new CardPaymentService($configuration, $validator, $redactor);
+        $this->cardPaymentService = new CardPaymentService(
+            $configuration,
+            $validator,
+            $redactor,
+            $hostedCardCheckout
+        );
         $this->transactionService = new TransactionService(
             $configuration,
             $transport,

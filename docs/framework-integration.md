@@ -1,18 +1,12 @@
 # Intégration framework
 
-Le framework adapte quatre contrats : authentification/autorisation de la session, `CheckoutStoreInterface`, mapping HTTP, et effets métier après transition.
+Le cœur dépend uniquement de PSR-18, PSR-17, PSR-7 et PSR-3.
 
-## Schéma recommandé
+- [PHP natif](../examples/plain-php/README.md) : bootstrap Composer, fakes, stockage démonstration, routes et frontend.
+- [CodeIgniter 4](../examples/codeigniter4/README.md) : `Config`, `Services`, store DB, contrôleur propriétaire, routes, migration, CSRF et modal.
+- [Laravel](../examples/laravel/README.md) : config, service provider, Eloquent store, middleware propriétaire, Form Request, événements et tests HTTP.
+- Symfony : enregistrer `FlexPayConfiguration`, un `Psr\Http\Client\ClientInterface`, deux factories PSR-17 et un logger ; binder ensuite `FlexPayClient` et `CheckoutManager`.
 
-Une table de sessions contient au minimum : `checkout_id` unique et opaque, `merchant_reference` unique, montant, devise, méthodes, méthode choisie, statut normalisé, état checkout, identifiant fournisseur indexé, URL de checkout protégée, dates, version et payload de reconstruction. Une table de transitions possède une contrainte `(checkout_id, version)`. Une table de callbacks possède un `event_id` unique.
+Dans tous les frameworks, l’application garde les responsabilités suivantes : authentification, autorisation par commande, calcul du montant, génération de référence, CSRF, throttling, transactions du store, queue/outbox, secrets et erreurs publiques. Le callback est exempté de CSRF uniquement sur sa route dédiée et reste authentifié par le mécanisme configuré.
 
-L’application doit :
-
-- exécuter `save` et `recordTransition` dans une transaction réelle ;
-- contrôler la version attendue dans l’`UPDATE` ;
-- chiffrer ou protéger l’URL hébergée lorsqu’elle contient un token ;
-- ne jamais utiliser le stockage mémoire/fichier en production ;
-- lier la session à son propriétaire sans exposer cette relation dans le package ;
-- rendre les effets métier idempotents avec une contrainte unique applicative.
-
-Consultez `examples/codeigniter4`, `examples/laravel` et `examples/plain-php`.
+Les exemples activent Mobile Money par défaut. Ajouter `PaymentMethod::CARD` seulement après injection d’une implémentation confirmée de `HostedCardCheckoutInterface`.

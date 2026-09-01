@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Holduix\FlexPay\Tests\Unit;
 
+use Holduix\FlexPay\Config\FlexPayConfiguration;
 use Holduix\FlexPay\DTO\Request\MobileMoneyPaymentRequest;
 use Holduix\FlexPay\Exception\AuthenticationException;
 use Holduix\FlexPay\Exception\InvalidResponseException;
@@ -32,10 +33,14 @@ final class HttpErrorTest extends TestCase
 
     public function testInvalidJsonIsRejected(): void
     {
-        $this->expectException(InvalidResponseException::class);
-        ClientFactory::create(new FakeHttpClient([new Response(200, [], '{invalid')]))
-            ->transactions()
-            ->getStatus('ORDER-1');
+        try {
+            ClientFactory::create(new FakeHttpClient([
+                new Response(200, [], '<html>Bearer secret-token token=leak +243970000003</html>'),
+            ]))->transactions()->getStatus('ORDER-1');
+            self::fail('Une InvalidResponseException était attendue.');
+        } catch (InvalidResponseException $exception) {
+            self::assertArrayNotHasKey('body', $exception->rawResponse);
+        }
     }
 
     public function testEmptyBodyIsRejected(): void
@@ -65,5 +70,23 @@ final class HttpErrorTest extends TestCase
             self::assertFalse($timeout->retryable);
             self::assertCount(1, $http->requests);
         }
+    }
+
+    public function testOversizedProviderResponseIsRejected(): void
+    {
+        $configuration = new FlexPayConfiguration(
+            apiBaseUrl: 'https://backend.flexpay.cd',
+            cardBaseUrl: 'https://cardpayment.flexpay.cd',
+            merchantId: 'MERCHANT-TEST',
+            apiToken: 'token-test',
+            callbackToken: 'callback-test',
+            maxProviderResponseBytes: 1024
+        );
+
+        $this->expectException(InvalidResponseException::class);
+        ClientFactory::create(
+            new FakeHttpClient([new Response(200, [], str_repeat('a', 1025))]),
+            configuration: $configuration
+        )->transactions()->getStatus('ORDER-1');
     }
 }

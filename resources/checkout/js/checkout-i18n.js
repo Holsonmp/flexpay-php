@@ -1,3 +1,11 @@
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 export const FLEXPAY_CHECKOUT_MESSAGES = Object.freeze({
   fr: Object.freeze({
     choosePaymentMethod: "Choisissez votre moyen de paiement",

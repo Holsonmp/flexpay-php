@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace App\Repositories;
@@ -37,7 +45,7 @@ final class EloquentCheckoutStore implements CheckoutStoreInterface
             'provider_transaction_id' => $session->providerTransactionId(),
             'status' => $session->normalizedStatus()->value,
             'version' => $session->version(),
-            // Utiliser un cast chiffré ou un KMS pour protéger l’URL hébergée.
+            // Appliquer la politique de chiffrement de l’application aux données client persistées.
             'payload_json' => json_encode($session->toStorageArray(), JSON_THROW_ON_ERROR),
             'updated_at' => now(),
         ];

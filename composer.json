@@ -1,11 +1,17 @@
 {
     "name": "holduix/flexpay-php",
-    "description": "Client PHP framework-agnostic pour les flux FlexPay",
+    "description": "Bibliothèque PHP indépendante pour l’intégration des paiements FlexPay par Mobile Money et carte hébergée",
     "type": "library",
+    "keywords": [
+        "flexpay",
+        "mobile-money",
+        "payment",
+        "psr-18"
+    ],
     "license": "MIT",
     "authors": [
         {
-            "name": "Holduix"
+            "name": "Holson Mpangala (Holsonmp) / Holduix"
         }
     ],
     "require": {
@@ -22,6 +28,9 @@
         "phpunit/phpunit": "^10.5",
         "squizlabs/php_codesniffer": "^3.13"
     },
+    "suggest": {
+        "guzzlehttp/guzzle": "Implémentation PSR-18 et PSR-7 utilisable pour créer le client"
+    },
     "autoload": {
         "psr-4": {
             "Holduix\\FlexPay\\": "src/"
@@ -36,16 +45,73 @@
         "bin/flexpay-assets"
     ],
     "scripts": {
-        "test": "phpunit",
-        "analyse": "phpstan analyse src tests",
-        "style": "phpcs --standard=PSR12 src tests bin/flexpay-assets",
+        "test": "phpunit --configuration phpunit.xml.dist",
+        "analyse": "phpstan analyse --configuration=phpstan.neon.dist --memory-limit=512M",
+        "style": "phpcs",
+        "headers:check": "@php tools/check-license-headers.php",
+        "api:check": "@php tools/check-api-docs.php",
+        "examples:test": "@php tools/check-examples.php",
+        "assets:check": "@php tools/check-dist.php",
+        "installation:test": "@php tools/check-installation.php",
+        "check": [
+            "@composer validate --strict",
+            "@headers:check",
+            "@api:check",
+            "@test",
+            "@analyse",
+            "@style",
+            "@examples:test",
+            "npm test"
+        ],
+        "release:check": [
+            "@check",
+            "@assets:check",
+            "@installation:test",
+            "@composer audit --locked --no-interaction"
+        ],
         "coverage": [
-            "phpunit --coverage-clover=coverage.xml",
+            "phpunit --configuration phpunit.xml.dist --coverage-clover=coverage.xml",
             "@php scripts/check-coverage.php coverage.xml 85"
         ]
     },
     "config": {
+        "allow-plugins": {},
+        "optimize-autoloader": true,
         "sort-packages": true
+    },
+    "archive": {
+        "exclude": [
+            "/.github",
+            "/.editorconfig",
+            "/.phpstan-cache",
+            "/.phpunit.cache",
+            "/.phpunit.result.cache",
+            "/docs/audits",
+            "/examples/*/tests",
+            "/examples/plain-php/public/vendor",
+            "/examples/plain-php/var",
+            "/fixtures",
+            "/node_modules",
+            "/private",
+            "/scripts",
+            "/tests",
+            "/tools",
+            "/vendor",
+            "/coverage",
+            "/coverage.xml",
+            "/*.tar",
+            "/*.tar.gz",
+            "/*.zip",
+            "/.DS_Store",
+            "/.env",
+            "/.env.*",
+            "/composer.lock",
+            "/package.json",
+            "/package-lock.json",
+            "/phpcs.xml.dist",
+            "/phpstan.neon.dist",
+            "/phpunit.xml.dist"
+        ]
     },
     "minimum-stability": "stable",
     "prefer-stable": true

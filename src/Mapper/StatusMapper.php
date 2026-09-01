@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Mapper;
@@ -19,8 +27,6 @@ final class StatusMapper
         'response_code',
         'responseCode',
         'code',
-        'message',
-        'messsage',
     ];
 
     public function __construct(private readonly DataExtractor $extractor)
@@ -33,11 +39,8 @@ final class StatusMapper
     public function map(array $payload): StatusMapping
     {
         foreach ($this->extractor->collect($payload, self::STATUS_KEYS) as $value) {
-            if (is_bool($value)) {
-                return new StatusMapping(
-                    $value ? NormalizedPaymentStatus::SUCCESSFUL : NormalizedPaymentStatus::FAILED,
-                    $value ? 'true' : 'false'
-                );
+            if (is_bool($value) || is_float($value)) {
+                continue;
             }
             if (!is_scalar($value)) {
                 continue;
@@ -75,57 +78,43 @@ final class StatusMapper
 
     private function mapValue(string $raw): NormalizedPaymentStatus
     {
-        if (is_numeric($raw)) {
-            return match ((int) $raw) {
-                0 => NormalizedPaymentStatus::SUCCESSFUL,
-                1 => NormalizedPaymentStatus::FAILED,
-                2 => NormalizedPaymentStatus::PENDING,
+        if (preg_match('/^[0-9]+$/', $raw) === 1) {
+            return match ($raw) {
+                '0' => NormalizedPaymentStatus::SUCCESSFUL,
+                '1' => NormalizedPaymentStatus::FAILED,
+                '2' => NormalizedPaymentStatus::PENDING,
                 default => NormalizedPaymentStatus::UNKNOWN,
             };
         }
 
         $value = strtolower(trim(str_replace(['-', ' '], '_', $raw)));
         $failureWords = ['failed', 'failure', 'declined', 'error', 'rejected', 'invalid', 'insufficient'];
-        if ($this->contains($value, $failureWords)) {
+        if (in_array($value, $failureWords, true)) {
             return NormalizedPaymentStatus::FAILED;
         }
-        if ($this->contains($value, ['cancelled', 'canceled'])) {
+        if (in_array($value, ['cancelled', 'canceled'], true)) {
             return NormalizedPaymentStatus::CANCELLED;
         }
-        if ($this->contains($value, ['expired', 'timeout'])) {
+        if (in_array($value, ['expired', 'timeout'], true)) {
             return NormalizedPaymentStatus::EXPIRED;
         }
-        if ($this->contains($value, ['requires_action', 'action_required'])) {
+        if (in_array($value, ['requires_action', 'action_required'], true)) {
             return NormalizedPaymentStatus::REQUIRES_ACTION;
         }
-        if ($this->contains($value, ['processing', 'in_progress'])) {
+        if (in_array($value, ['processing', 'in_progress'], true)) {
             return NormalizedPaymentStatus::PROCESSING;
         }
-        if ($this->contains($value, ['pending', 'awaiting', 'initiated', 'request'])) {
+        if (in_array($value, ['pending', 'awaiting', 'initiated', 'request'], true)) {
             return NormalizedPaymentStatus::PENDING;
         }
-        if ($this->contains($value, ['created'])) {
+        if ($value === 'created') {
             return NormalizedPaymentStatus::CREATED;
         }
         $successWords = ['success', 'successful', 'paid', 'approved', 'completed', 'complete', 'verified', 'ok'];
-        if ($this->contains($value, $successWords)) {
+        if (in_array($value, $successWords, true)) {
             return NormalizedPaymentStatus::SUCCESSFUL;
         }
 
         return NormalizedPaymentStatus::UNKNOWN;
-    }
-
-    /**
-     * @param list<string> $needles
-     */
-    private function contains(string $value, array $needles): bool
-    {
-        foreach ($needles as $needle) {
-            if (str_contains($value, $needle)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

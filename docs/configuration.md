@@ -1,54 +1,53 @@
 # Configuration
 
-Toutes les valeurs sont injectées dans `FlexPayConfiguration`. Le package ne lit ni `$_ENV`, ni `getenv()`.
+## FlexPayConfiguration
 
-| Paramètre | Rôle | Défaut confirmé |
-|---|---|---|
-| `apiBaseUrl` | API C2B/statut | `https://backend.flexpay.cd` |
-| `cardBaseUrl` | API/checkout carte | `https://cardpayment.flexpay.cd` |
-| `merchantId` | code marchand | aucun |
-| `apiToken` | Bearer et query checkout | aucun |
-| `callbackToken` | contrôle applicatif optionnel | vide |
-| `mobileMoneyEndpoint` | création C2B | `/api/rest/v1/paymentService` |
-| `transactionStatusEndpoint` | statut générique | `/api/rest/v1/check` |
-| `cardOrderStatusEndpoint` | statut carte | `/api/rest/v1/vpos/orderNumber` |
-| `cardCheckoutEndpoint` | checkout hébergé | `/v3/pay` |
-| `defaultCurrency` | défaut applicatif | `CDF` |
-| `timeoutSeconds` | contrat de transport | 30 |
+| Option | Type / défaut | Obligatoire | Impact |
+|---|---|---|---|
+| `apiBaseUrl` | string | oui | URL serveur Mobile Money/statut ; HTTPS obligatoire. |
+| `cardBaseUrl` | string | oui | Base de statut/allowlist carte ; HTTPS obligatoire. |
+| `merchantId` | string | oui | Identifiant serveur, filtré des réponses brutes. |
+| `apiToken` | string | oui | Bearer serveur ; jamais navigateur, query ou log. |
+| `callbackToken` | string, `''` | en pratique oui | Un callback est refusé par défaut lorsqu’il est vide. |
+| `mobileMoneyEndpoint` | string, `/api/rest/v1/paymentService` | non | Contrat historique à confirmer avec le fournisseur. |
+| `transactionStatusEndpoint` | string, `/api/rest/v1/check` | non | Contrat historique à confirmer. |
+| `cardOrderStatusEndpoint` | string, `/api/rest/v1/vpos/orderNumber` | non | Contrat historique à confirmer. |
+| `cardCheckoutEndpoint` | string, `/v3/pay` | non | Conservé pour compatibilité, non utilisé par le flux carte sûr. |
+| `defaultCurrency` | string, `CDF` | non | Trois lettres ; les requêtes fournissent leur devise. |
+| `timeoutSeconds` | int, `30` | non | 1–300 secondes ; le client PSR-18 doit recevoir un timeout cohérent. |
+| `allowInsecureUrls` | bool, `false` | non | Réservé aux fakes locaux ; interdit en production. |
+| `retry` | `RetryConfiguration` | non | Lectures seulement ; jamais une création ambiguë. |
+| `allowUnauthenticatedCallbacks` | bool, `false` | non | Opt-out dangereux, uniquement si une protection externe prouvée existe. |
+| `allowCallbackTokenInQuery` | bool, `false` | non | Les query strings fuient dans historiques/logs ; laisser faux. |
+| `maxCallbackBodyBytes` | int, `65536` | non | 1 Ko–1 Mo. |
+| `maxProviderResponseBytes` | int, `1048576` | non | 1 Ko–10 Mo. |
 
-HTTPS est exigé. `allowInsecureUrls=true` existe uniquement pour le développement local. Configurez également le timeout sur le client PSR-18 concret.
-
-Ne versionnez jamais token, code marchand privé ou token callback. Le fichier `config/flexpay.example.php` ne contient aucune valeur réelle.
+`RetryConfiguration` vaut par défaut 3 tentatives, 200 ms de base, 2 000 ms maximum et jitter. Elle ne s’applique qu’aux lectures marquées sûres.
 
 ## CheckoutConfiguration
 
-| Paramètre | Défaut | Origine |
+| Option | Défaut | Rôle |
 |---|---:|---|
-| `allowedCheckoutHosts` | `cardpayment.flexpay.cd` | hôte observé dans le legacy |
-| `allowInsecureCheckoutUrls` | `false` | sécurité de la librairie |
-| `pollInitialDelayMilliseconds` | 0 | appel immédiat legacy |
-| `pollIntervalMilliseconds` | 4 000 | intervalle legacy |
-| `pollMaximumIntervalMilliseconds` | 10 000 | décision configurable de backoff |
-| `pollTimeoutSeconds` | 180 | 45 × 4 secondes dans le legacy |
-| `statusMinimumRefreshSeconds` | 4 | cache serveur ajouté |
-| `maximumNetworkErrors` | 3 | décision configurable |
-| `statusPathTemplate` | route HTTP recommandée | doit contenir `{checkoutId}` |
+| `allowedCheckoutHosts` | `cardpayment.flexpay.cd` | Correspondance exacte des hôtes de redirection. |
+| `allowInsecureCheckoutUrls` | `false` | HTTP local explicite uniquement. |
+| `pollInitialDelayMilliseconds` | `0` | Délai avant premier poll navigateur. |
+| `pollIntervalMilliseconds` | `4000` | Poll applicatif minimal. |
+| `pollMaximumIntervalMilliseconds` | `10000` | Backoff maximal. |
+| `pollTimeoutSeconds` | `180` | Timeout UI ; devient `unknown`, jamais `failed`. |
+| `statusMinimumRefreshSeconds` | `4` | Cache/throttle serveur fournisseur. |
+| `maximumNetworkErrors` | `3` | Après ce seuil, état local `unknown`. |
+| `statusPathTemplate` | `/payments/flexpay/checkouts/{checkoutId}/status` | Doit contenir `{checkoutId}`. |
 
-Les applications peuvent mapper les variables suivantes vers l’objet :
+Exemple :
 
-```dotenv
-FLEXPAY_DRIVER=legacy
-FLEXPAY_CHECKOUT_UI=legacy
-FLEXPAY_ALLOW_PACKAGE_IN_PRODUCTION=false
-FLEXPAY_CHECKOUT_POLL_INITIAL_DELAY_MS=0
-FLEXPAY_CHECKOUT_POLL_INTERVAL_MS=4000
-FLEXPAY_CHECKOUT_POLL_MAX_INTERVAL_MS=10000
-FLEXPAY_CHECKOUT_POLL_TIMEOUT_SECONDS=180
-FLEXPAY_STATUS_MIN_REFRESH_SECONDS=4
-FLEXPAY_CARD_ALLOWED_CHECKOUT_HOSTS=cardpayment.flexpay.cd
-FLEXPAY_CHECKOUT_SUCCESS_URL=
-FLEXPAY_CHECKOUT_CANCEL_URL=
-FLEXPAY_CALLBACK_URL=
+```php
+$configuration = new FlexPayConfiguration(
+    apiBaseUrl: (string) getenv('FLEXPAY_URL_API'),
+    cardBaseUrl: (string) getenv('FLEXPAY_URL_API_CARD'),
+    merchantId: (string) getenv('FLEXPAY_MERCHANT'),
+    apiToken: (string) getenv('FLEXPAY_TOKEN'),
+    callbackToken: (string) getenv('FLEXPAY_CALLBACK_TOKEN')
+);
 ```
 
-Le package ne lit pas directement ces variables. `CheckoutFeaturePolicy` maintient la production sur `legacy` tant qu’une permission explicite n’est pas fournie.
+Les variables restent une convention de l’application ; le package ne les lit pas lui-même.

@@ -1,22 +1,27 @@
 # Tests
 
-La suite comprend les contrats bas niveau historiques, la machine à états, les doubles initialisations, callback/retour dans les deux ordres, le filtrage public, l’allowlist de redirection, la publication des assets et les parcours JavaScript headless/modal.
+## Commandes
 
 ```bash
-composer validate --strict
-composer install --no-interaction --prefer-dist
-vendor/bin/phpunit
-vendor/bin/phpstan analyse src tests
-vendor/bin/phpcs --standard=PSR12 src tests
-npm ci
+composer test
+composer analyse
+composer style
+composer examples:test
 npm test
 npm run build
+composer coverage
+composer installation:test
+composer release:check
 ```
 
-Les fixtures `legacy_fake_mode` et `legacy_integration_test` proviennent des contrats du dépôt. Celles marquées `robustness_only_not_observed` vérifient la robustesse et ne prétendent pas représenter une réponse FlexPay observée.
+- `tests/Unit` couvre configuration, validation, redaction, mapping, machine à états et politiques.
+- `tests/Contract` valide payloads, transport, statuts, carte injectée et callbacks.
+- `tests/Integration` exécute checkout, ordre callback/retour, déduplication, concurrence et assets.
+- `tests/JavaScript` teste API, CSRF, polling, erreurs, redirections, événements, modal, focus et traductions dans JSDOM.
+- `fixtures` contient des réponses historiques ou de robustesse explicitement marquées ; aucune n’est une preuve fournisseur actuelle.
 
-Le sandbox est ignoré sauf si toutes les variables suivantes existent et si `FLEXPAY_SANDBOX_ENABLED=true` : `FLEXPAY_BASE_URL`, `FLEXPAY_MERCHANT_ID`, `FLEXPAY_API_TOKEN`, `FLEXPAY_CALLBACK_URL`, `FLEXPAY_TEST_PHONE`, `FLEXPAY_TEST_AMOUNT`, `FLEXPAY_TEST_CURRENCY`.
+La couverture CI utilise Xdebug et échoue sous 85 % global via `scripts/check-coverage.php`. Les zones critiques sont exercées par matrices et scénarios malveillants. Un poste sans Xdebug/PCOV ne peut pas produire de mesure locale : l’absence d’extension doit être rapportée, pas masquée.
 
-Ce test est potentiellement transactionnel, exclu de la CI et ne doit utiliser que des identifiants sandbox avec un montant minimal autorisé. Aucun secret n’est imprimé.
+`SandboxTest` ne s’exécute que si `FLEXPAY_SANDBOX_ENABLED=true` et si les identifiants de sandbox sont volontairement fournis. La CI normale n’effectue jamais de paiement réel.
 
-La CI collecte la couverture avec Xdebug. `scripts/check-coverage.php` échoue sous 85 %. Les zones critiques — transitions, filtrage, URL, callback, double initialisation, mapping et redaction — sont testées directement. La couverture locale nécessite Xdebug ou PCOV ; sans pilote, aucun pourcentage ne doit être revendiqué. Les assets distribués sont reconstruits et comparés au dépôt.
+`tools/check-examples.php` lint tous les fichiers PHP, valide leurs imports package et exécute le fake natif. `tools/check-installation.php` consomme le package via repository path dans un dossier temporaire sans réseau fournisseur. `tools/check-license-headers.php` et `tools/check-api-docs.php` empêchent les divergences d’attribution/API.

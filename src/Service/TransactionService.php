@@ -1,11 +1,20 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Service;
 
 use Holduix\FlexPay\Config\FlexPayConfiguration;
 use Holduix\FlexPay\DTO\Response\TransactionStatusResult;
+use Holduix\FlexPay\Enum\NormalizedPaymentStatus;
 use Holduix\FlexPay\Enum\PaymentMethod;
 use Holduix\FlexPay\Http\ApiTransport;
 use Holduix\FlexPay\Mapper\StatusMapper;
@@ -75,23 +84,35 @@ final class TransactionService
             'Reference',
         ]) ?? '';
         $amount = $this->extractor->firstScalar($raw, ['amount', 'amountCustomer']);
+        $numericAmount = is_numeric($amount) ? (float) $amount : 0.0;
+        $currency = strtoupper($this->extractor->firstScalar($raw, ['currency']) ?? '');
+        $returnedProviderTransactionId = $this->extractor->firstScalar($raw, [
+            'orderNumber',
+            'order_number',
+            'ordernumber',
+            'provider_reference',
+            'providerReference',
+            'transaction_id',
+        ]);
+        $completeSuccessfulConfirmation = $returnedProviderTransactionId !== null
+            && hash_equals($providerTransactionId, $returnedProviderTransactionId)
+            && $merchantReference !== ''
+            && $numericAmount > 0
+            && $currency !== '';
+        $normalizedStatus = $mapping->normalizedStatus === NormalizedPaymentStatus::SUCCESSFUL
+            && !$completeSuccessfulConfirmation
+                ? NormalizedPaymentStatus::UNKNOWN
+                : $mapping->normalizedStatus;
 
         return new TransactionStatusResult(
-            normalizedStatus: $mapping->normalizedStatus,
+            normalizedStatus: $normalizedStatus,
             rawStatus: $mapping->rawStatus,
             rawResponse: $this->redactor->redact($raw),
             transactionReference: $merchantReference,
-            providerTransactionId: $this->extractor->firstScalar($raw, [
-                'orderNumber',
-                'order_number',
-                'ordernumber',
-                'provider_reference',
-                'providerReference',
-                'transaction_id',
-            ]) ?? $providerTransactionId,
+            providerTransactionId: $returnedProviderTransactionId,
             paymentMethod: $paymentMethod,
-            amount: is_numeric($amount) ? (float) $amount : 0.0,
-            currency: strtoupper($this->extractor->firstScalar($raw, ['currency']) ?? ''),
+            amount: $numericAmount,
+            currency: $currency,
             message: $this->extractor->firstScalar($raw, ['message', 'messsage']),
             occurredAt: $this->extractor->firstScalar($raw, ['occurredAt', 'createdAt', 'created_at'])
         );

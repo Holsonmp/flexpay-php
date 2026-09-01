@@ -1,14 +1,23 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Service;
 
 use Holduix\FlexPay\Config\FlexPayConfiguration;
+use Holduix\FlexPay\Contracts\HostedCardCheckoutInterface;
 use Holduix\FlexPay\DTO\Request\CardPaymentRequest;
 use Holduix\FlexPay\DTO\Response\CardPaymentResult;
-use Holduix\FlexPay\Enum\NormalizedPaymentStatus;
-use Holduix\FlexPay\Enum\PaymentMethod;
+use Holduix\FlexPay\Exception\UnsupportedOperationException;
+use Holduix\FlexPay\Exception\ValidationException;
 use Holduix\FlexPay\Support\Redactor;
 use Holduix\FlexPay\Validation\RequestValidator;
 
@@ -17,92 +26,94 @@ final class CardPaymentService
     public function __construct(
         private readonly FlexPayConfiguration $configuration,
         private readonly RequestValidator $validator,
-        private readonly Redactor $redactor
+        private readonly Redactor $redactor,
+        private readonly ?HostedCardCheckoutInterface $hostedCheckout = null
     ) {
     }
 
     public function createPayment(CardPaymentRequest $request): CardPaymentResult
     {
         $phone = $this->validator->validateCard($request);
-        $currency = strtoupper(trim($request->currency));
-        $token = $this->rawPortalToken();
-        $query = [
-            'authorization' => $token,
-            'merchant' => $this->configuration->merchantId,
-            'reference' => trim($request->merchantReference),
-            'amount' => (string) $request->amount,
-            'currency' => $currency,
-            'description' => $request->description,
-            'approve_url' => $request->approveUrl,
-            'callback_url' => $request->callbackUrl,
-            'cancel_url' => $request->cancelUrl,
-            'decline_url' => $request->declineUrl,
-            'home_url' => $request->homeUrl,
-            'token' => $token,
-            'merchant_code' => $token,
-            'app_code' => $this->configuration->merchantId,
-            'redirection' => '1',
-            'payment_method' => $request->paymentMethod === PaymentMethod::PORTAL
-                ? ''
-                : $request->paymentMethod->value,
-        ];
-
-        if ($phone !== '') {
-            $query['customer_phone'] = $phone;
-            $query['customerPhone'] = $phone;
+        if ($this->hostedCheckout === null) {
+            throw new UnsupportedOperationException(
+                'Checkout carte désactivé : aucun adaptateur fournisseur confirmé et sûr pour le navigateur.'
+            );
         }
-        $query = array_filter($query, static fn (string $value): bool => trim($value) !== '');
-        $endpoint = $this->resolveCheckoutEndpoint();
-        $checkoutUrl = $endpoint . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
-        $raw = $this->redactor->redact([
-            '_source' => 'package_portal',
-            '_http_code' => 200,
-            'status' => 'pending',
-            'reference' => trim($request->merchantReference),
-            'merchant' => $this->configuration->merchantId,
-            'amount' => $request->amount,
-            'currency' => $currency,
-            'description' => $request->description,
-            'payment_url' => $checkoutUrl,
-            'callback_url' => $request->callbackUrl,
-            'approve_url' => $request->approveUrl,
-            'cancel_url' => $request->cancelUrl,
-            'decline_url' => $request->declineUrl,
-            'home_url' => $request->homeUrl,
-            'customer_phone' => $phone,
-            'payment_method' => $request->paymentMethod->value,
-        ]);
+
+        $result = $this->hostedCheckout->createCheckout($request, $phone);
+        $this->assertSafeResult($request, $result);
 
         return new CardPaymentResult(
-            accepted: true,
-            checkoutUrl: $checkoutUrl,
-            normalizedStatus: NormalizedPaymentStatus::PENDING,
-            rawStatus: 'pending',
-            rawResponse: $raw,
-            transactionReference: trim($request->merchantReference),
-            providerTransactionId: null,
-            paymentMethod: $request->paymentMethod,
-            amount: $request->amount,
-            currency: $currency,
-            message: null,
-            occurredAt: null
+            accepted: $result->accepted,
+            checkoutUrl: $result->checkoutUrl,
+            normalizedStatus: $result->normalizedStatus,
+            rawStatus: $result->rawStatus,
+            rawResponse: $this->redactor->redact($result->rawResponse),
+            transactionReference: $result->transactionReference,
+            providerTransactionId: $result->providerTransactionId,
+            paymentMethod: $result->paymentMethod,
+            amount: $result->amount,
+            currency: $result->currency,
+            message: $result->message,
+            occurredAt: $result->occurredAt
         );
     }
 
-    private function rawPortalToken(): string
+    private function assertSafeResult(CardPaymentRequest $request, CardPaymentResult $result): void
     {
-        $token = trim($this->configuration->apiToken);
-        return stripos($token, 'bearer ') === 0 ? trim(substr($token, 7)) : $token;
-    }
-
-    private function resolveCheckoutEndpoint(): string
-    {
-        if (preg_match('~^https?://~i', $this->configuration->cardCheckoutEndpoint) === 1) {
-            return $this->configuration->cardCheckoutEndpoint;
+        $url = filter_var($result->checkoutUrl, FILTER_VALIDATE_URL);
+        $scheme = strtolower((string) parse_url($result->checkoutUrl, PHP_URL_SCHEME));
+        $host = strtolower((string) parse_url($result->checkoutUrl, PHP_URL_HOST));
+        $expectedHost = strtolower((string) parse_url($this->configuration->cardBaseUrl, PHP_URL_HOST));
+        if (
+            $url === false
+            || ($scheme !== 'https' && !($scheme === 'http' && $this->configuration->allowInsecureUrls))
+            || $host === ''
+            || !hash_equals($expectedHost, $host)
+            || parse_url($result->checkoutUrl, PHP_URL_USER) !== null
+            || parse_url($result->checkoutUrl, PHP_URL_PASS) !== null
+        ) {
+            throw new ValidationException('Checkout carte : l’URL retournée par l’adaptateur est refusée.');
         }
 
-        return rtrim($this->configuration->cardBaseUrl, '/')
-            . '/'
-            . ltrim($this->configuration->cardCheckoutEndpoint, '/');
+        $apiToken = trim($this->configuration->apiToken);
+        $apiToken = stripos($apiToken, 'bearer ') === 0 ? trim(substr($apiToken, 7)) : $apiToken;
+        $decodedUrl = $this->fullyDecodeUrl($result->checkoutUrl);
+        foreach ([$apiToken, trim($this->configuration->callbackToken)] as $serverSecret) {
+            if ($serverSecret !== '' && str_contains($decodedUrl, $serverSecret)) {
+                throw new ValidationException(
+                    'Checkout carte : un secret serveur ne peut pas être exposé au navigateur.'
+                );
+            }
+        }
+
+        if (
+            $result->transactionReference !== trim($request->merchantReference)
+            || abs($result->amount - $request->amount) > 0.00001
+            || strtoupper($result->currency) !== strtoupper(trim($request->currency))
+            || $result->paymentMethod !== $request->paymentMethod
+        ) {
+            throw new ValidationException(
+                'Checkout carte : le résultat de l’adaptateur ne correspond pas à la requête.'
+            );
+        }
+    }
+
+    private function fullyDecodeUrl(string $url): string
+    {
+        if (strlen($url) > 4096) {
+            throw new ValidationException('Checkout carte : l’URL retournée par l’adaptateur est trop longue.');
+        }
+
+        $decoded = $url;
+        for ($iteration = 0, $limit = strlen($url) + 1; $iteration < $limit; ++$iteration) {
+            $next = rawurldecode($decoded);
+            if ($next === $decoded) {
+                return $decoded;
+            }
+            $decoded = $next;
+        }
+
+        throw new ValidationException('Checkout carte : l’encodage de l’URL est invalide.');
     }
 }

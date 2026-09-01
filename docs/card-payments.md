@@ -1,13 +1,25 @@
-# Paiements carte
+# Carte hébergée
 
-Pour la persistance avant redirection, la validation de l’URL et le retour utilisateur, voir [card-checkout.md](card-checkout.md).
+La bibliothèque ne manipule jamais PAN, CVV, date d’expiration ou données brutes de carte.
 
-Le comportement actif est un checkout hébergé. Le package ne reçoit jamais PAN, date d’expiration ou CVV.
+## Contrat sûr
 
-`CardPaymentRequest` fournit montant, devise, référence, description, callback, URLs approve/cancel/decline/home, téléphone optionnel et méthode. `createPayment()` retourne immédiatement `CardPaymentResult::checkoutUrl`; l’application redirige ensuite le navigateur.
+Le flux historique construisait une URL navigateur avec le même Bearer que l’API serveur. Cette capacité est supprimée. Sans `HostedCardCheckoutInterface`, `CardPaymentService` lève `UnsupportedOperationException`.
 
-Les paramètres de query reproduisent exactement le legacy, y compris les trois variantes contenant le token. Traitez l’URL comme un secret transitoire : pas de log, pas d’analytics, pas de stockage durable. `rawResponse` contient une version filtrée.
+L’adaptateur injecté doit être fondé sur une documentation ou validation fournisseur et retourner une URL publique/éphémère. Le package contrôle ensuite :
 
-Le retour navigateur n’est pas une confirmation. La confirmation doit venir d’une lecture serveur ou d’un callback vérifié. Le package expose `getCardOrderStatus()` pour l’endpoint `orderNumber`.
+- URL valide, HTTPS hors fake local explicite ;
+- hôte exactement égal à celui de `cardBaseUrl` ;
+- absence de userinfo ;
+- absence du token API, même encodé ;
+- référence, montant, devise et méthode identiques à la requête.
 
-À vérifier : durée de session, 3-D Secure, token de session, statuts intermédiaires et comportement officiel en cas de fermeture du checkout. Annulation et remboursement fournisseur ne sont pas pris en charge.
+La session est persistée en `requires_action`/`redirecting` avant de rendre l’action, mais l’URL complète n’est jamais écrite dans `CheckoutSession::toStorageArray()`.
+
+## Retour et callback
+
+L’identifiant reçu du navigateur ou du callback reste un candidat. Le serveur interroge le fournisseur avec ce candidat. Il ne le lie à la session que si la réponse renvoie exactement le même identifiant avec référence, montant et devise cohérents. Un statut `successful` incomplet est refusé et place la session en `unknown`.
+
+Callback avant retour, retour avant callback et callbacks répétés sont testés avec fakes. Un paiement encore pending au retour reste pending. Le délai minimal de refresh empêche les signaux rapprochés de marteler le fournisseur.
+
+Le comportement 3DS, la création d’une session publique, les statuts exacts et le mécanisme de callback carte restent à valider avec le fournisseur.

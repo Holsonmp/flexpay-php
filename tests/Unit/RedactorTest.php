@@ -48,4 +48,16 @@ final class RedactorTest extends TestCase
 
         self::assertSame('Numéro +243******003 refusé.', $result['message']);
     }
+
+    public function testSecretsEmbeddedInFreeTextAreRedacted(): void
+    {
+        $result = (new Redactor())->redact([
+            'message' => 'authorization=abc token:very-secret password=hunter2',
+        ]);
+
+        self::assertSame(
+            'authorization=[REDACTED] token:[REDACTED] password=[REDACTED]',
+            $result['message']
+        );
+    }
 }

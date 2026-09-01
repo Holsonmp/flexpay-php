@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Config;
@@ -13,9 +21,6 @@ final class FlexPayPackage extends BaseConfig
     public string $merchantId = '';
     public string $apiToken = '';
     public string $callbackToken = '';
-    public string $driver = 'legacy';
-    public string $checkoutUi = 'legacy';
-    public bool $allowPackageInProduction = false;
     /** @var list<string> */
     public array $allowedCheckoutHosts = ['cardpayment.flexpay.cd'];
 
@@ -25,12 +30,6 @@ final class FlexPayPackage extends BaseConfig
         $this->merchantId = (string) env('FLEXPAY_MERCHANT', '');
         $this->apiToken = (string) env('FLEXPAY_TOKEN', '');
         $this->callbackToken = (string) env('FLEXPAY_CALLBACK_TOKEN', '');
-        $this->driver = strtolower((string) env('FLEXPAY_DRIVER', 'legacy'));
-        $this->checkoutUi = strtolower((string) env('FLEXPAY_CHECKOUT_UI', 'legacy'));
-        $this->allowPackageInProduction = filter_var(
-            (string) env('FLEXPAY_ALLOW_PACKAGE_IN_PRODUCTION', 'false'),
-            FILTER_VALIDATE_BOOLEAN
-        );
         $this->allowedCheckoutHosts = array_values(array_filter(array_map(
             'trim',
             explode(',', (string) env('FLEXPAY_CARD_ALLOWED_CHECKOUT_HOSTS', 'cardpayment.flexpay.cd'))

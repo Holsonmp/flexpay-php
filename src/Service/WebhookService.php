@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Service;
@@ -28,9 +36,13 @@ final class WebhookService
      */
     public function parse(array $headers, string $body, array $query = []): WebhookEvent
     {
+        $this->verifyCallbackToken($headers, $query);
+        if (strlen($body) > $this->configuration->maxCallbackBodyBytes) {
+            throw new InvalidWebhookException('Callback FlexPay : le corps dépasse la taille autorisée.');
+        }
         $payload = $this->decodeBody($body);
         $payload = array_merge($query, $payload);
-        $this->verifyCallbackToken($headers, $payload, $query);
+        $this->assertPayloadBudget($payload);
 
         $merchantReference = $this->extractor->firstScalar($payload, [
             'merchant_reference',
@@ -82,13 +94,16 @@ final class WebhookService
         }
 
         try {
-            $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+            $decoded = json_decode($body, true, 32, JSON_THROW_ON_ERROR);
             if (is_array($decoded)) {
                 /** @var array<string, mixed> $decoded */
                 return $decoded;
             }
-        } catch (JsonException) {
+        } catch (JsonException $exception) {
             // Le callback legacy accepte également application/x-www-form-urlencoded.
+            if (str_starts_with($body, '{') || str_starts_with($body, '[')) {
+                throw new InvalidWebhookException('Callback FlexPay : le JSON est invalide.', previous: $exception);
+            }
         }
 
         parse_str($body, $parsedPayload);
@@ -106,30 +121,68 @@ final class WebhookService
 
     /**
      * @param array<string, string|list<string>> $headers
-     * @param array<string, mixed> $payload
      * @param array<string, mixed> $query
      */
-    private function verifyCallbackToken(array $headers, array $payload, array $query): void
+    private function verifyCallbackToken(array $headers, array $query): void
     {
         $expectedToken = trim($this->configuration->callbackToken);
         if ($expectedToken === '') {
-            return;
+            if ($this->configuration->allowUnauthenticatedCallbacks) {
+                return;
+            }
+            throw new InvalidWebhookException(
+                'Callback FlexPay : authentification obligatoire mais aucun token n’est configuré.'
+            );
         }
 
-        $tokenCandidate = $query['token'] ?? $payload['token'] ?? '';
-        $providedToken = is_scalar($tokenCandidate) ? trim((string) $tokenCandidate) : '';
-        if ($providedToken === '') {
-            foreach ($headers as $name => $value) {
-                if (strtolower($name) !== 'x-flexpay-callback-token') {
-                    continue;
-                }
-                $providedToken = is_array($value) ? trim((string) ($value[0] ?? '')) : trim($value);
-                break;
+        $providedToken = '';
+        foreach ($headers as $name => $value) {
+            if (strtolower($name) !== 'x-flexpay-callback-token') {
+                continue;
+            }
+            if (is_array($value) && count($value) !== 1) {
+                throw new InvalidWebhookException('Callback FlexPay : header de token dupliqué.');
+            }
+            $providedToken = is_array($value) ? trim((string) $value[0]) : trim($value);
+            break;
+        }
+        if (array_key_exists('token', $query)) {
+            if (!$this->configuration->allowCallbackTokenInQuery) {
+                throw new InvalidWebhookException('Callback FlexPay : le token dans l’URL est refusé.');
+            }
+            if ($providedToken === '') {
+                $candidate = $query['token'];
+                $providedToken = is_scalar($candidate) ? trim((string) $candidate) : '';
             }
         }
 
         if ($providedToken === '' || !hash_equals($expectedToken, $providedToken)) {
             throw new InvalidWebhookException('Callback FlexPay : token invalide.');
         }
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function assertPayloadBudget(array $payload): void
+    {
+        $fields = 0;
+        $walk = function (array $values, int $depth) use (&$walk, &$fields): void {
+            if ($depth > 16) {
+                throw new InvalidWebhookException('Callback FlexPay : structure trop imbriquée.');
+            }
+            foreach ($values as $key => $value) {
+                ++$fields;
+                if ($fields > 128 || strlen((string) $key) > 128) {
+                    throw new InvalidWebhookException('Callback FlexPay : trop de champs.');
+                }
+                if (is_array($value)) {
+                    $walk($value, $depth + 1);
+                    continue;
+                }
+                if (is_scalar($value) && strlen((string) $value) > 4096) {
+                    throw new InvalidWebhookException('Callback FlexPay : valeur trop longue.');
+                }
+            }
+        };
+        $walk($payload, 0);
     }
 }

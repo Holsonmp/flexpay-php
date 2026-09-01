@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Config;
@@ -23,7 +31,11 @@ final class FlexPayConfiguration
         public readonly string $defaultCurrency = 'CDF',
         public readonly int $timeoutSeconds = 30,
         public readonly bool $allowInsecureUrls = false,
-        ?RetryConfiguration $retry = null
+        ?RetryConfiguration $retry = null,
+        public readonly bool $allowUnauthenticatedCallbacks = false,
+        public readonly bool $allowCallbackTokenInQuery = false,
+        public readonly int $maxCallbackBodyBytes = 65536,
+        public readonly int $maxProviderResponseBytes = 1048576
     ) {
         $this->retry = $retry ?? new RetryConfiguration();
         $this->validate();
@@ -39,6 +51,16 @@ final class FlexPayConfiguration
         }
         if ($this->timeoutSeconds < 1 || $this->timeoutSeconds > 300) {
             throw new ConfigurationException('Configuration : le timeout doit être compris entre 1 et 300 secondes.');
+        }
+        if ($this->maxCallbackBodyBytes < 1024 || $this->maxCallbackBodyBytes > 1048576) {
+            throw new ConfigurationException(
+                'Configuration : la taille maximale d’un callback doit être comprise entre 1 Ko et 1 Mo.'
+            );
+        }
+        if ($this->maxProviderResponseBytes < 1024 || $this->maxProviderResponseBytes > 10485760) {
+            throw new ConfigurationException(
+                'Configuration : la taille maximale d’une réponse fournisseur doit être comprise entre 1 Ko et 10 Mo.'
+            );
         }
         $this->validateBaseUrl($this->apiBaseUrl, 'URL API');
         $this->validateBaseUrl($this->cardBaseUrl, 'URL API carte');

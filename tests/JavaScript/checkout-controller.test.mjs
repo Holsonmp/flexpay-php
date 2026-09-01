@@ -41,6 +41,7 @@ function controllerOptions(fetch, overrides = {}) {
     },
     fetch,
     autoRedirect: false,
+    allowedRedirectHosts: ["cardpayment.flexpay.cd"],
     ...overrides,
   };
 }
@@ -288,6 +289,16 @@ test("les schémas et hôtes de redirection dangereux sont refusés", () => {
   assert.throws(() => controller.validateRedirectUrl("javascript:alert(1)"));
   assert.throws(() => controller.validateRedirectUrl("https://evil.example/pay"));
   controller.destroy();
+});
+
+test("une allowlist absente refuse toute redirection", () => {
+  assert.throws(
+    () =>
+      new FlexPayCheckoutController(
+        controllerOptions(queuedFetch([]), { allowedRedirectHosts: [] }),
+      ),
+    /explicitement autorisé/,
+  );
 });
 
 test("les événements ne contiennent ni téléphone ni payload brut", async () => {

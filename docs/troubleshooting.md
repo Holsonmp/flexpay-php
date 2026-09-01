@@ -2,14 +2,18 @@
 
 | Symptôme | Vérification |
 |---|---|
-| Configuration manquante | merchant/token injectés, sans espace parasite |
-| Callback refusé | même token dans configuration et header/query |
-| Callback introuvable | présence de référence locale ou `orderNumber` |
-| Checkout sans redirection | endpoint carte, URL sensible non tronquée avant redirection |
-| JSON invalide/HTML | proxy ou endpoint incorrect ; consulter statut HTTP/correlation ID |
-| Timeout de création | ne pas recréer ; relire avec la référence existante |
-| Statut `unknown` | conserver raw status, ne pas confirmer, ajouter une fixture après preuve |
-| Package non activé | `FLEXPAY_DRIVER=package` uniquement hors production dans cette phase |
-| Classe package absente | exécuter `composer install` à la racine |
+| Token invalide / HTTP 401 | Secret du bon environnement, sans espaces ; ne jamais l’afficher. |
+| Mauvais endpoint | Comparer les URLs configurées au contrat marchand ; les défauts sont historiques. |
+| Client PSR-18 absent | Installer/configurer une implémentation telle que Guzzle et des factories PSR-17. |
+| Callback non reçu | HTTPS public, route/reverse proxy, taille, throttling et `X-FlexPay-Callback-Token`. |
+| Callback refusé | Header unique, token constant-time, référence présente, body JSON/form valide et sous 64 Ko par défaut. |
+| Transaction bloquée pending | Respecter le délai de refresh, vérifier côté serveur, monitorer et rapprocher manuellement. |
+| Timeout de création | Considérer le résultat ambigu ; ne pas recréer automatiquement. |
+| URL carte refusée | Adaptateur injecté, HTTPS, hôte exact, aucun userinfo/Bearer. |
+| JSON invalide / HTML / XML | `InvalidResponseException`; vérifier endpoint/proxy, utiliser `correlationId`. |
+| Polling trop fréquent | Ajuster `statusMinimumRefreshSeconds` et intervalles checkout, sans forçage client. |
+| Asset introuvable | `npm run build`, puis `vendor/bin/flexpay-assets publish <cible>`. |
+| Écrasement asset refusé | Vérifier la cible, puis utiliser explicitement `--force` sur des fichiers réguliers. |
+| Carte désactivée | Faire valider le contrat hébergé et injecter `HostedCardCheckoutInterface`. |
 
-Les erreurs réseau ne doivent jamais être résolues en imprimant les payloads ou secrets.
+Ne copiez pas `rawResponse` dans une réponse navigateur. Pour un diagnostic, conserver le type d’erreur, statut HTTP, hôte et `correlationId` dans les logs serveur filtrés.

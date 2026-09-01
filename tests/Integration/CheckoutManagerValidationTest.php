@@ -177,8 +177,9 @@ final class CheckoutManagerValidationTest extends TestCase
             'currency' => 'USD',
         ], JSON_THROW_ON_ERROR);
 
-        $first = $manager->handleCallback(new HandleCheckoutCallbackRequest([], $body));
-        $second = $manager->handleCallback(new HandleCheckoutCallbackRequest([], $body));
+        $headers = ['X-FlexPay-Callback-Token' => 'callback-test'];
+        $first = $manager->handleCallback(new HandleCheckoutCallbackRequest($headers, $body));
+        $second = $manager->handleCallback(new HandleCheckoutCallbackRequest($headers, $body));
         self::assertNotSame('successful', $first->checkout->status);
         self::assertTrue($second->idempotent);
     }
@@ -215,6 +216,53 @@ final class CheckoutManagerValidationTest extends TestCase
         } finally {
             self::assertSame(CheckoutState::UNKNOWN, $store->findById($session->id())?->state());
         }
+    }
+
+    public function testSparseSuccessfulReturnNeverBindsAnUntrustedProviderReference(): void
+    {
+        $http = new FakeHttpClient([$this->response([
+            'status' => 'success',
+            'orderNumber' => 'FOREIGN-SUCCESS',
+        ])]);
+        [$manager, $store] = $this->manager($http);
+        $session = $manager->create(self::request());
+        $manager->initialize(new InitializeCheckoutRequest($session->id(), PaymentMethod::CARD));
+
+        $result = $manager->handleReturn(new HandleCheckoutReturnRequest(
+            $session->id(),
+            ['orderNumber' => 'FOREIGN-SUCCESS']
+        ));
+        $stored = $store->findById($session->id());
+
+        self::assertNotNull($stored);
+        self::assertNull($stored->providerTransactionId());
+        self::assertSame('FOREIGN-SUCCESS', $stored->providerTransactionCandidate());
+        self::assertNotSame(CheckoutState::SUCCESSFUL, $stored->state());
+        self::assertFalse($result->checkout->terminal);
+    }
+
+    public function testSparseSuccessfulMobileInitializationRequiresAProviderRead(): void
+    {
+        $http = new FakeHttpClient([$this->response([
+            'status' => 'success',
+            'orderNumber' => 'UNVERIFIED-MOBILE-ID',
+        ])]);
+        [$manager, $store] = $this->manager($http);
+        $session = $manager->create(self::request());
+
+        $result = $manager->initialize(new InitializeCheckoutRequest(
+            $session->id(),
+            PaymentMethod::MOBILE_MONEY,
+            '+243970000003'
+        ));
+        $stored = $store->findById($session->id());
+
+        self::assertNotNull($stored);
+        self::assertSame('unknown', $result->checkout->status);
+        self::assertFalse($result->checkout->terminal);
+        self::assertNull($stored->providerTransactionId());
+        self::assertSame('UNVERIFIED-MOBILE-ID', $stored->providerTransactionCandidate());
+        self::assertCount(1, $http->requests);
     }
 
     public function testExpiredSessionBecomesTerminalBeforeInitialization(): void

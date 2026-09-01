@@ -1,3 +1,11 @@
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 document.addEventListener("DOMContentLoaded", () => {
   const trigger = document.querySelector("#pay-button");
   if (!trigger || !window.FlexPayCheckout) {

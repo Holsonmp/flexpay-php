@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.1'
+            dependencies: lowest
+          - php: '8.1'
+            dependencies: locked
+          - php: '8.2'
+            dependencies: locked
+          - php: '8.3'
+            dependencies: locked
+          - php: '8.4'
+            dependencies: locked
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - run: composer validate --strict
+      - if: matrix.dependencies == 'locked'
+        run: composer install --no-interaction --prefer-dist --no-progress
+      - if: matrix.dependencies == 'lowest'
+        run: composer update --prefer-lowest --prefer-stable --no-interaction --no-progress
+      - run: composer test
+      - run: composer analyse
+      - run: composer style
+      - run: composer examples:test
+      - run: composer headers:check
+      - run: composer api:check
+      - run: composer audit --locked --no-interaction
+      - run: git diff --check
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+          coverage: xdebug
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: composer coverage
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: git diff --exit-code -- dist
+
+  installation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: composer installation:test

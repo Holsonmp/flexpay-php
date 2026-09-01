@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Checkout;
@@ -175,7 +183,15 @@ final class CheckoutManager
         if ($session->normalizedStatus()->isFinal()) {
             return new CheckoutOperationResult($this->publicView($session), CheckoutAction::none(), true);
         }
-        if (!$this->refreshPolicy->shouldRefresh($session, $this->now(), $request->forceProviderRefresh)) {
+        $candidate = $session->providerTransactionId() ?? $session->providerTransactionCandidate();
+        if (
+            !$this->refreshPolicy->shouldRefreshCandidate(
+                $session,
+                $this->now(),
+                $candidate,
+                $request->forceProviderRefresh
+            )
+        ) {
             return new CheckoutOperationResult(
                 $this->publicView($session),
                 $this->pollAction($session),
@@ -183,7 +199,7 @@ final class CheckoutManager
             );
         }
 
-        return $this->refreshFromProvider($session);
+        return $this->refreshFromProvider($session, $candidate);
     }
 
     public function handleReturn(HandleCheckoutReturnRequest $request): CheckoutOperationResult
@@ -201,27 +217,26 @@ final class CheckoutManager
             'providerReference',
             'transaction_id',
         ]);
-        if ($session->providerTransactionId() === null && $providerReference !== null) {
-            $expectedVersion = $session->version();
-            $session->attachProviderTransactionId($providerReference, $this->now());
-            $this->store->save($session, $expectedVersion);
-        }
-
-        if ($session->providerTransactionId() === null) {
+        $candidate = $session->providerTransactionId() ?? $providerReference;
+        if ($candidate === null) {
             return new CheckoutOperationResult($this->publicView($session), $this->pollAction($session));
         }
+        $this->rememberProviderCandidate($session, $candidate);
+        if (!$this->refreshPolicy->shouldRefreshCandidate($session, $this->now(), $candidate)) {
+            return new CheckoutOperationResult($this->publicView($session), $this->pollAction($session), true);
+        }
 
-        return $this->refreshStatus(new RefreshCheckoutStatusRequest($session->id(), true));
+        return $this->refreshFromProvider($session, $candidate);
     }
 
     public function handleCallback(HandleCheckoutCallbackRequest $request): CheckoutOperationResult
     {
-        $eventId = $this->callbackEventId($request);
         $event = $this->flexPayClient->webhooks()->parse(
             $request->headers,
             $request->rawBody,
             $request->queryParameters
         );
+        $eventId = $this->callbackEventId($event);
         $session = $this->findForWebhook($event);
         if ($this->store->hasProcessedCallback($eventId)) {
             return new CheckoutOperationResult($this->publicView($session), CheckoutAction::none(), true);
@@ -233,21 +248,20 @@ final class CheckoutManager
             return new CheckoutOperationResult($this->publicView($session), CheckoutAction::none(), true);
         }
 
-        if ($session->providerTransactionId() === null && $event->providerTransactionId !== null) {
-            $expectedVersion = $session->version();
-            $session->attachProviderTransactionId($event->providerTransactionId, $this->now());
-            $this->store->save($session, $expectedVersion);
+        $candidate = $session->providerTransactionId() ?? $event->providerTransactionId;
+        if ($candidate === null) {
+            $this->markCallbackProcessed($session, $eventId);
+            return new CheckoutOperationResult($this->publicView($session), $this->pollAction($session));
         }
-
-        $result = $session->providerTransactionId() === null
-            ? new CheckoutOperationResult($this->publicView($session), $this->pollAction($session))
-            : $this->refreshStatus(new RefreshCheckoutStatusRequest($session->id(), true));
+        $this->rememberProviderCandidate($session, $candidate);
+        if (!$this->refreshPolicy->shouldRefreshCandidate($session, $this->now(), $candidate)) {
+            // Le candidat reste rejouable : un callback non vérifié n’est jamais dédupliqué définitivement.
+            return new CheckoutOperationResult($this->publicView($session), $this->pollAction($session));
+        }
+        $result = $this->refreshFromProvider($session, $candidate);
 
         $latest = $this->load($session->id());
-        $expectedVersion = $latest->version();
-        $latest->markCallbackProcessed($this->now());
-        $this->store->save($latest, $expectedVersion);
-        $this->store->markCallbackProcessed($eventId, $latest->id());
+        $this->markCallbackProcessed($latest, $eventId);
 
         return new CheckoutOperationResult(
             $this->publicView($latest),
@@ -268,19 +282,32 @@ final class CheckoutManager
             callbackUrl: $session->callbackUrl(),
             description: $session->description()
         ));
-        $targetState = $this->statusMapper->toCheckoutState($result->normalizedStatus);
+        if ($result->providerTransactionId !== null) {
+            $this->rememberProviderCandidate($session, $result->providerTransactionId);
+        }
+        $observedStatus = $result->normalizedStatus === NormalizedPaymentStatus::SUCCESSFUL
+            ? NormalizedPaymentStatus::PENDING
+            : $result->normalizedStatus;
+        $targetState = $this->statusMapper->toCheckoutState($observedStatus);
         if (!$result->accepted && $targetState === CheckoutState::PENDING) {
             $targetState = CheckoutState::UNKNOWN;
         }
         $session->setProviderObservation(
-            $result->normalizedStatus,
+            $observedStatus,
             $result->rawStatus,
-            $result->providerTransactionId,
+            null,
             null,
             $this->now(),
             $this->parseOccurredAt($result->occurredAt)
         );
         $this->transition($session, $targetState, 'provider');
+
+        if (
+            $result->normalizedStatus === NormalizedPaymentStatus::SUCCESSFUL
+            && $result->providerTransactionId !== null
+        ) {
+            return $this->refreshFromProvider($session, $result->providerTransactionId);
+        }
 
         return new CheckoutOperationResult(
             $this->publicView($session),
@@ -305,13 +332,17 @@ final class CheckoutManager
             paymentMethod: $paymentMethod
         ));
         $checkoutUrl = $this->redirectValidator->validate($result->checkoutUrl);
+        if ($result->providerTransactionId !== null) {
+            $this->rememberProviderCandidate($session, $result->providerTransactionId);
+        }
         $session->setProviderObservation(
             NormalizedPaymentStatus::REQUIRES_ACTION,
             $result->rawStatus,
-            $result->providerTransactionId,
-            $checkoutUrl,
+            null,
+            null,
             $this->now(),
-            $this->parseOccurredAt($result->occurredAt)
+            $this->parseOccurredAt($result->occurredAt),
+            false
         );
         // La première sauvegarde garantit la persistance avant que l’action de redirection soit exposée.
         $this->transition($session, CheckoutState::REQUIRES_ACTION, 'provider');
@@ -323,12 +354,17 @@ final class CheckoutManager
         );
     }
 
-    private function refreshFromProvider(CheckoutSession $session): CheckoutOperationResult
-    {
+    private function refreshFromProvider(
+        CheckoutSession $session,
+        ?string $providerTransactionIdCandidate = null
+    ): CheckoutOperationResult {
         $this->transition($session, CheckoutState::VERIFYING, 'application');
+        $expectedVersion = $session->version();
+        $session->markProviderRefreshStarted($this->now());
+        $this->store->save($session, $expectedVersion);
 
         try {
-            $providerTransactionId = $session->providerTransactionId();
+            $providerTransactionId = $session->providerTransactionId() ?? $providerTransactionIdCandidate;
             if ($providerTransactionId === null) {
                 return new CheckoutOperationResult($this->publicView($session), $this->pollAction($session));
             }
@@ -338,7 +374,16 @@ final class CheckoutManager
                     $providerTransactionId,
                     $session->selectedMethod() ?? PaymentMethod::MOBILE_MONEY
                 );
-            $this->assertProviderResultMatchesSession($result, $session);
+            $completeBinding = $this->assertProviderResultMatchesSession(
+                $result,
+                $session,
+                $providerTransactionId
+            );
+            if ($session->providerTransactionId() === null && $completeBinding) {
+                $expectedVersion = $session->version();
+                $session->attachProviderTransactionId($providerTransactionId, $this->now());
+                $this->store->save($session, $expectedVersion);
+            }
             $this->applyProviderResult($result, $session);
 
             return new CheckoutOperationResult(
@@ -377,7 +422,7 @@ final class CheckoutManager
         $session->setProviderObservation(
             $result->normalizedStatus,
             $result->rawStatus,
-            $result->providerTransactionId,
+            $session->providerTransactionId() === null ? null : $result->providerTransactionId,
             null,
             $this->now(),
             $this->parseOccurredAt($result->occurredAt)
@@ -446,6 +491,30 @@ final class CheckoutManager
             'ambiguous' => $exception->ambiguous,
             'exception' => $exception::class,
         ]);
+    }
+
+    private function rememberProviderCandidate(CheckoutSession $session, string $candidate): void
+    {
+        $candidate = trim($candidate);
+        if (
+            $candidate === ''
+            || $candidate === $session->providerTransactionId()
+            || $candidate === $session->providerTransactionCandidate()
+        ) {
+            return;
+        }
+
+        $expectedVersion = $session->version();
+        $session->rememberProviderTransactionCandidate($candidate, $this->now());
+        $this->store->save($session, $expectedVersion);
+    }
+
+    private function markCallbackProcessed(CheckoutSession $session, string $eventId): void
+    {
+        $expectedVersion = $session->version();
+        $session->markCallbackProcessed($this->now());
+        $this->store->save($session, $expectedVersion);
+        $this->store->markCallbackProcessed($eventId, $session->id());
     }
 
     private function load(string $checkoutId): CheckoutSession
@@ -519,6 +588,16 @@ final class CheckoutManager
         if ($event->merchantReference !== null && $event->merchantReference !== $session->merchantReference()) {
             throw new CheckoutConflictException('La référence du callback ne correspond pas.', 'reference_mismatch');
         }
+        if (
+            $session->providerTransactionId() !== null
+            && $event->providerTransactionId !== null
+            && !hash_equals($session->providerTransactionId(), $event->providerTransactionId)
+        ) {
+            throw new CheckoutConflictException(
+                'L’identifiant fournisseur du callback ne correspond pas.',
+                'provider_transaction_mismatch'
+            );
+        }
         if ($event->amount !== null && abs($event->amount - $session->amount()) > 0.00001) {
             throw new CheckoutConflictException('Le montant du callback ne correspond pas.', 'amount_mismatch');
         }
@@ -533,8 +612,18 @@ final class CheckoutManager
 
     private function assertProviderResultMatchesSession(
         TransactionStatusResult $result,
-        CheckoutSession $session
-    ): void {
+        CheckoutSession $session,
+        string $queriedProviderTransactionId
+    ): bool {
+        if (
+            $result->providerTransactionId === null
+            || !hash_equals($queriedProviderTransactionId, $result->providerTransactionId)
+        ) {
+            throw new CheckoutConflictException(
+                'L’identifiant de la réponse fournisseur ne correspond pas à la requête.',
+                'provider_transaction_mismatch'
+            );
+        }
         if (
             $result->transactionReference !== ''
             && $result->transactionReference !== $session->merchantReference()
@@ -547,6 +636,18 @@ final class CheckoutManager
         if ($result->currency !== '' && strtoupper($result->currency) !== $session->currency()) {
             throw new CheckoutConflictException('La devise fournisseur ne correspond pas.', 'currency_mismatch');
         }
+
+        $completeBinding = $result->transactionReference !== ''
+            && $result->amount > 0
+            && $result->currency !== '';
+        if ($result->normalizedStatus === NormalizedPaymentStatus::SUCCESSFUL && !$completeBinding) {
+            throw new CheckoutConflictException(
+                'La réponse fournisseur réussie ne contient pas toutes les données de corrélation.',
+                'incomplete_provider_confirmation'
+            );
+        }
+
+        return $completeBinding;
     }
 
     private function isOlderProviderEvent(WebhookEvent $event, CheckoutSession $session): bool
@@ -595,12 +696,18 @@ final class CheckoutManager
         }
     }
 
-    private function callbackEventId(HandleCheckoutCallbackRequest $request): string
+    private function callbackEventId(WebhookEvent $event): string
     {
-        $query = $request->queryParameters;
-        ksort($query);
+        $identity = [
+            'merchant_reference' => $event->merchantReference,
+            'provider_transaction_id' => $event->providerTransactionId,
+            'raw_status' => $event->rawStatus,
+            'amount' => $event->amount,
+            'currency' => $event->currency === null ? null : strtoupper(trim($event->currency)),
+            'occurred_at' => $event->occurredAt,
+        ];
 
-        return 'cb_' . hash('sha256', $request->rawBody . '|' . (string) json_encode($query));
+        return 'cb_' . hash('sha256', (string) json_encode($identity, JSON_UNESCAPED_SLASHES));
     }
 
     private function eventNameFor(CheckoutState $state): string

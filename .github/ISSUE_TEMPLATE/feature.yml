@@ -1,0 +1,20 @@
+name: Évolution
+description: Proposer une capacité fondée sur un besoin et un contrat vérifiable.
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: Besoin applicatif
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Source du contrat ou preuve disponible
+      description: Ne collez aucun document confidentiel ou secret.
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Impact de compatibilité et sécurité

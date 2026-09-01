@@ -80,7 +80,13 @@ final class HttpStatusMatrixTest extends TestCase
     {
         $http = new FakeHttpClient([
             new Response(503, [], '{"message":"Indisponible"}'),
-            new Response(200, [], '{"orderNumber":"ORDER-1","status":"success"}'),
+            new Response(200, [], json_encode([
+                'orderNumber' => 'ORDER-1',
+                'status' => 'success',
+                'reference' => 'MERCHANT-ORDER-1',
+                'amount' => 10,
+                'currency' => 'USD',
+            ], JSON_THROW_ON_ERROR)),
         ]);
         $factory = new Psr17Factory();
         $client = new FlexPayClient(
@@ -117,5 +123,17 @@ final class HttpStatusMatrixTest extends TestCase
         self::assertFalse($result->accepted);
         self::assertNull($result->providerTransactionId);
         self::assertCount(1, $http->requests);
+    }
+
+    public function testSparseSuccessfulStatusIsDowngradedToUnknown(): void
+    {
+        $result = ClientFactory::create(new FakeHttpClient([
+            new Response(200, [], '{"status":"success","orderNumber":"ORDER-SPARSE"}'),
+        ]))->transactions()->getStatus('ORDER-SPARSE');
+
+        self::assertSame('unknown', $result->normalizedStatus->value);
+        self::assertSame('', $result->transactionReference);
+        self::assertSame(0.0, $result->amount);
+        self::assertSame('', $result->currency);
     }
 }

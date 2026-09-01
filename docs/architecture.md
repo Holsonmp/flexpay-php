@@ -1,29 +1,24 @@
 # Architecture
 
-## Trois couches
+Le package sépare les contrats fournisseur, l’orchestration applicative et l’interface optionnelle.
 
-1. `FlexPayClient` et ses services restent le client bas niveau : HTTP PSR-18, payloads confirmés, normalisation, erreurs, redaction et callback.
-2. `CheckoutManager` orchestre session, persistance, transitions, vérification, retour et idempotence sans dépendance framework ou base de données.
-3. `resources/checkout` et `dist/` fournissent une UI facultative : API HTTP de l’application uniquement, contrôleur headless puis modal construit au-dessus.
+1. `FlexPayClient` assemble configuration, transport PSR-18, factories PSR-17, logger PSR-3, validation, redaction et services.
+2. `MobileMoneyService`, `TransactionService`, `CardPaymentService` et `WebhookService` exposent des DTO typés.
+3. `ApiTransport` ajoute le Bearer uniquement aux appels serveur, borne les réponses, classifie les erreurs et ne retente que les lectures explicitement sûres.
+4. `StatusMapper` normalise des valeurs exactes ; une valeur inconnue reste `unknown`.
+5. `CheckoutManager` orchestre une `CheckoutSession`, une machine à états et un `CheckoutStoreInterface` fourni par l’application.
+6. Le frontend appelle exclusivement les endpoints same-origin de l’application. Il n’accède ni au Bearer, ni au montant décisionnel, ni au fournisseur.
 
-Le moteur n’appelle jamais une classe frontend. Le frontend n’appelle jamais FlexPay. Les effets commande, stock, billet, facture ou email restent derrière `CheckoutEventListenerInterface` dans l’application.
+## Frontières
 
-`FlexPayClient` assemble quatre services : `MobileMoneyService`, `CardPaymentService`, `TransactionService` et `WebhookService`. Le transport HTTP commun repose sur PSR-18/17/7, la journalisation sur PSR-3 et aucune classe ne lit directement l’environnement.
+- Le package ne lit pas l’environnement, la session utilisateur ou la base de données.
+- L’application crée les références et montants, contrôle la propriété du checkout, fournit CSRF/rate limiting et implémente un store transactionnel.
+- `InMemoryCheckoutStore` est un fake de test. Les stores d’exemple illustrent les contraintes uniques et le verrou optimiste sans prétendre couvrir toutes les exigences opérationnelles.
+- Le listener est appelé après persistance ; les effets lourds doivent être envoyés vers une queue/outbox applicative et rester idempotents.
+- La carte est une capacité injectée. Aucun endpoint de création de session publique n’est inventé dans le cœur.
 
-La configuration, les DTO de requête, les DTO de résultat, le mapping des statuts, la validation et la redaction sont séparés. Le package ne contient ni modèle, ni session, ni réponse framework, ni HTML, ni règle de commande.
+## Fiabilité
 
-Flux :
+Une création Mobile Money n’est jamais retentée automatiquement. Un identifiant reçu par initiation, retour ou callback est d’abord persisté comme candidat non fiable et rejouable. Les lectures peuvent être retentées avec backoff borné ; seul un tuple fournisseur complet lie définitivement le candidat. Avant une lecture, une marque de rafraîchissement limite les appels concurrents, mais un callback throttlé n’est pas dédupliqué tant que sa vérification n’a pas abouti. `successful`, `failed`, `cancelled` et `expired` sont terminaux ; `successful` n’est jamais rétrogradé.
 
-```text
-Application -> DTO -> validation -> service -> transport PSR-18 -> FlexPay
-                                      |                |
-                                      v                v
-                                status mapper     erreurs typées
-                                      |
-                                      v
-                              résultat typé filtré
-```
-
-La carte constitue une exception confirmée : le service construit une URL de checkout hébergé et n’envoie pas de requête serveur. Les adaptateurs CodeIgniter/Laravel restent hors du cœur.
-
-Les créations ne sont jamais retentées. Les lectures GET peuvent être retentées si `RetryConfiguration::maxAttempts` est explicitement supérieur à 1. La valeur par défaut reste 1, car aucune politique FlexPay n’est confirmée.
+Les réponses et callbacks sont lus une seule fois, avec limites de taille, profondeur, nombre de champs et longueur scalaire. La priorité est la corrélation exacte, pas l’acceptation permissive de formes inconnues.

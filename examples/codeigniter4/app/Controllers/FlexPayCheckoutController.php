@@ -1,10 +1,19 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace App\Controllers;
 
 use CodeIgniter\RESTful\ResourceController;
+use CodeIgniter\Exceptions\PageNotFoundException;
 use Config\Services;
 use Holduix\FlexPay\Checkout\DTO\HandleCheckoutCallbackRequest;
 use Holduix\FlexPay\Checkout\DTO\CreateCheckoutRequest;
@@ -27,15 +36,13 @@ final class FlexPayCheckoutController extends ResourceController
     public function createForOrder(int $orderId)
     {
         // Le montant, la devise et la référence proviennent exclusivement de la commande serveur.
-        $order = db_connect()->table('orders')->where('id', $orderId)->get()->getRow();
-        if ($order === null) {
-            return $this->failNotFound('Commande introuvable.');
-        }
+        $order = $this->authorizedOrder($orderId);
         $session = Services::flexPayCheckout()->create(new CreateCheckoutRequest(
             merchantReference: (string) $order->reference,
             amount: (float) $order->total_amount,
             currency: (string) $order->currency,
-            allowedMethods: [PaymentMethod::MOBILE_MONEY, PaymentMethod::CARD],
+            // La carte n’est ajoutée qu’après injection d’un adaptateur hébergé confirmé.
+            allowedMethods: [PaymentMethod::MOBILE_MONEY],
             successUrl: site_url('payments/flexpay/result'),
             cancelUrl: site_url('payments/flexpay/cancel'),
             callbackUrl: site_url('payments/flexpay/callback'),
@@ -79,6 +86,7 @@ final class FlexPayCheckoutController extends ResourceController
 
     public function paymentReturn(string $checkoutId)
     {
+        $this->assertAuthorized($checkoutId);
         $result = Services::flexPayCheckout()->handleReturn(new HandleCheckoutReturnRequest(
             $checkoutId,
             $this->request->getGet()
@@ -93,18 +101,45 @@ final class FlexPayCheckoutController extends ResourceController
         foreach ($this->request->headers() as $name => $header) {
             $headers[$name] = $header->getValueLine();
         }
-        $result = Services::flexPayCheckout()->handleCallback(new HandleCheckoutCallbackRequest(
+        Services::flexPayCheckout()->handleCallback(new HandleCheckoutCallbackRequest(
             $headers,
             (string) $this->request->getBody(),
             $this->request->getGet()
         ));
-        return $this->respond(['acknowledged' => true, 'checkout_id' => $result->checkout->checkoutId]);
+        return $this->respond(['acknowledged' => true]);
     }
 
     private function assertAuthorized(string $checkoutId): void
     {
-        // Comparer ici le propriétaire de la commande et l’utilisateur authentifié.
-        // Ne jamais autoriser une session uniquement parce que son identifiant est valide.
+        $session = Services::flexPayCheckoutStore()->findById($checkoutId);
+        $userId = session()->get('user_id');
+        $order = $session === null || !is_numeric($userId)
+            ? null
+            : db_connect()->table('orders')
+                ->where('reference', $session->merchantReference())
+                ->where('user_id', (int) $userId)
+                ->get()
+                ->getRow();
+        if ($order === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+    }
+
+    private function authorizedOrder(int $orderId): object
+    {
+        $userId = session()->get('user_id');
+        $order = !is_numeric($userId)
+            ? null
+            : db_connect()->table('orders')
+                ->where('id', $orderId)
+                ->where('user_id', (int) $userId)
+                ->get()
+                ->getRow();
+        if ($order === null) {
+            throw PageNotFoundException::forPageNotFound();
+        }
+
+        return $order;
     }
 
     private function statusFor(CheckoutException $exception): int

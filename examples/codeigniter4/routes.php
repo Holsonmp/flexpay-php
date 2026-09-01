@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 $routes->post('orders/(:num)/flexpay-checkout', 'FlexPayCheckoutController::createForOrder/$1');
@@ -11,7 +19,8 @@ $routes->get(
     ['filter' => 'throttle:flexpay-status']
 );
 $routes->get('payments/flexpay/checkouts/(:segment)/return', 'FlexPayCheckoutController::paymentReturn/$1');
-$routes->post('payments/flexpay/callback', 'FlexPayCheckoutController::callback');
-
-// Route legacy conservée pendant la migration et désactivée après validation fournisseur.
-$routes->post('payment/flexpay/callback', 'FlexPayCallbackController::callback');
+$routes->post(
+    'payments/flexpay/callback',
+    'FlexPayCheckoutController::callback',
+    ['filter' => 'throttle:flexpay-callback']
+);

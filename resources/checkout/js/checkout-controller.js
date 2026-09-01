@@ -1,3 +1,11 @@
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 import { FlexPayCheckoutApi } from "./checkout-api.js";
 import {
   CHECKOUT_EVENTS,
@@ -26,6 +34,12 @@ export class FlexPayCheckoutController extends EventTarget {
     this.allowedRedirectHosts = (options.allowedRedirectHosts || []).map((host) =>
       String(host).toLowerCase(),
     );
+    if (
+      this.allowedRedirectHosts.length === 0 ||
+      this.allowedRedirectHosts.some((host) => !/^[a-z0-9.-]+$/i.test(host))
+    ) {
+      throw new TypeError("Au moins un hôte de redirection doit être explicitement autorisé.");
+    }
     this.polling = {
       initialDelayMs: Math.max(0, Number(options.polling?.initialDelayMs ?? 0)),
       intervalMs: Math.max(250, Number(options.polling?.intervalMs ?? 4000)),
@@ -252,10 +266,7 @@ export class FlexPayCheckoutController extends EventTarget {
     if (url.protocol !== "https:") {
       throw new TypeError("L’adresse de redirection doit utiliser HTTPS.");
     }
-    if (
-      this.allowedRedirectHosts.length > 0 &&
-      !this.allowedRedirectHosts.includes(url.hostname.toLowerCase())
-    ) {
+    if (!this.allowedRedirectHosts.includes(url.hostname.toLowerCase())) {
       throw new TypeError("L’hôte de redirection du paiement n’est pas autorisé.");
     }
     return url.toString();

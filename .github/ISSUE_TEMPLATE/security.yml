@@ -1,0 +1,14 @@
+name: Sécurité
+description: Ne pas publier une vulnérabilité exploitable ; consulter SECURITY.md.
+title: "[Security process] "
+body:
+  - type: markdown
+    attributes:
+      value: Un canal privé doit être utilisé. Consultez SECURITY.md. N’incluez ici ni détail exploitable, ni secret, ni donnée personnelle.
+  - type: checkboxes
+    id: acknowledgement
+    attributes:
+      label: Confirmation
+      options:
+        - label: J’ai lu SECURITY.md et je ne publie aucun détail sensible.
+          required: true

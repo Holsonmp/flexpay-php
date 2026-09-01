@@ -4,13 +4,18 @@ declare(strict_types=1);
 
 namespace Holduix\FlexPay\Tests\Contract;
 
+use Holduix\FlexPay\Contracts\HostedCardCheckoutInterface;
 use Holduix\FlexPay\DTO\Request\CardPaymentRequest;
+use Holduix\FlexPay\DTO\Response\CardPaymentResult;
 use Holduix\FlexPay\DTO\Request\MobileMoneyPaymentRequest;
 use Holduix\FlexPay\Enum\NormalizedPaymentStatus;
 use Holduix\FlexPay\Enum\PaymentMethod;
+use Holduix\FlexPay\Exception\UnsupportedOperationException;
+use Holduix\FlexPay\Exception\ValidationException;
 use Holduix\FlexPay\Tests\Support\ClientFactory;
 use Holduix\FlexPay\Tests\Support\FakeHttpClient;
 use Nyholm\Psr7\Response;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class PaymentContractTest extends TestCase
@@ -95,10 +100,29 @@ final class PaymentContractTest extends TestCase
         self::assertNotSame('243970000004', $result->rawResponse['reference']);
     }
 
-    public function testHostedCardCheckoutMatchesLegacyQueryContractWithoutRawCardData(): void
+    public function testHostedCardCheckoutIsDisabledWithoutAConfirmedBrowserSafeAdapter(): void
     {
-        $client = ClientFactory::create(new FakeHttpClient([]));
-        $result = $client->card()->createPayment(new CardPaymentRequest(
+        $client = ClientFactory::create(new FakeHttpClient([]), withFakeHostedCheckout: false);
+
+        $this->expectException(UnsupportedOperationException::class);
+        $client->card()->createPayment(new CardPaymentRequest(
+            amount: 50,
+            currency: 'USD',
+            merchantReference: 'ORDER-2026-0003',
+            description: 'Commande ORDER-2026-0003',
+            callbackUrl: 'https://example.com/callback',
+            approveUrl: 'https://example.com/approve',
+            cancelUrl: 'https://example.com/cancel',
+            declineUrl: 'https://example.com/decline',
+            homeUrl: 'https://example.com',
+            customerPhone: '+243970000003',
+            paymentMethod: PaymentMethod::CARD
+        ));
+    }
+
+    public function testConfirmedHostedCardAdapterNeverReceivesTheServerBearer(): void
+    {
+        $result = ClientFactory::create(new FakeHttpClient([]))->card()->createPayment(new CardPaymentRequest(
             amount: 50,
             currency: 'USD',
             merchantReference: 'ORDER-2026-0003',
@@ -113,20 +137,13 @@ final class PaymentContractTest extends TestCase
         ));
 
         self::assertTrue($result->accepted);
-        self::assertSame(NormalizedPaymentStatus::PENDING, $result->normalizedStatus);
-        self::assertNull($result->providerTransactionId);
+        self::assertSame(NormalizedPaymentStatus::REQUIRES_ACTION, $result->normalizedStatus);
+        self::assertStringNotContainsString('token-test', rawurldecode($result->checkoutUrl));
         parse_str((string) parse_url($result->checkoutUrl, PHP_URL_QUERY), $query);
-        self::assertSame('token-test', $query['authorization']);
-        self::assertSame('token-test', $query['token']);
-        self::assertSame('token-test', $query['merchant_code']);
-        self::assertSame('MERCHANT-TEST', $query['merchant']);
-        self::assertSame('MERCHANT-TEST', $query['app_code']);
-        self::assertSame('card', $query['payment_method']);
-        self::assertSame('243970000003', $query['customer_phone']);
+        self::assertArrayNotHasKey('authorization', $query);
+        self::assertArrayNotHasKey('token', $query);
+        self::assertArrayNotHasKey('merchant_code', $query);
         self::assertArrayNotHasKey('card_number', $query);
-        $redactedUrl = $result->rawResponse['payment_url'] ?? null;
-        self::assertIsString($redactedUrl);
-        self::assertStringNotContainsString('token-test', $redactedUrl);
     }
 
     public function testPortalModeOmitsForcedPaymentMethod(): void
@@ -147,5 +164,60 @@ final class PaymentContractTest extends TestCase
         parse_str((string) parse_url($result->checkoutUrl, PHP_URL_QUERY), $query);
 
         self::assertArrayNotHasKey('payment_method', $query);
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function leakingCheckoutUrls(): iterable
+    {
+        yield 'Bearer en clair' => ['https://cardpayment.flexpay.cd/pay?token=token-test'];
+        yield 'Bearer doublement encodé' => [
+            'https://cardpayment.flexpay.cd/pay?token=%2574oken-test',
+        ];
+        yield 'secret callback doublement encodé' => [
+            'https://cardpayment.flexpay.cd/pay?callback=%2563allback-test',
+        ];
+    }
+
+    #[DataProvider('leakingCheckoutUrls')]
+    public function testHostedCardAdapterCannotLeakAServerSecret(string $checkoutUrl): void
+    {
+        $adapter = new class ($checkoutUrl) implements HostedCardCheckoutInterface {
+            public function __construct(private readonly string $checkoutUrl)
+            {
+            }
+
+            public function createCheckout(CardPaymentRequest $request, string $normalizedPhone): CardPaymentResult
+            {
+                return new CardPaymentResult(
+                    accepted: true,
+                    checkoutUrl: $this->checkoutUrl,
+                    normalizedStatus: NormalizedPaymentStatus::REQUIRES_ACTION,
+                    rawStatus: 'requires_action',
+                    rawResponse: [],
+                    transactionReference: $request->merchantReference,
+                    providerTransactionId: null,
+                    paymentMethod: $request->paymentMethod,
+                    amount: $request->amount,
+                    currency: $request->currency
+                );
+            }
+        };
+
+        $this->expectException(ValidationException::class);
+        ClientFactory::create(
+            new FakeHttpClient([]),
+            hostedCardCheckout: $adapter
+        )->card()->createPayment(new CardPaymentRequest(
+            amount: 50,
+            currency: 'USD',
+            merchantReference: 'ORDER-LEAK',
+            description: 'Commande ORDER-LEAK',
+            callbackUrl: 'https://example.com/callback',
+            approveUrl: 'https://example.com/approve',
+            cancelUrl: 'https://example.com/cancel',
+            declineUrl: 'https://example.com/decline',
+            homeUrl: 'https://example.com',
+            paymentMethod: PaymentMethod::CARD
+        ));
     }
 }

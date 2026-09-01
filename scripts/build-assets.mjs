@@ -1,5 +1,16 @@
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 import { build } from "esbuild";
-import { copyFile, mkdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+
+const banner =
+  "/*! FlexPay Intégration By Holsonmp - Holduix | Copyright (c) 2026 Holson Mpangala / Holduix | MIT */";
 
 await mkdir("dist", { recursive: true });
 
@@ -10,6 +21,7 @@ await build({
   format: "esm",
   target: ["es2020"],
   legalComments: "none",
+  banner: { js: banner },
 });
 
 await build({
@@ -20,9 +32,19 @@ await build({
   globalName: "FlexPayCheckout",
   target: ["es2020"],
   legalComments: "none",
+  banner: { js: banner },
 });
 
-await copyFile(
+const cssSource = await readFile(
   "resources/checkout/css/flexpay-checkout.css",
+  "utf8",
+);
+const cssWithoutSourceHeader = cssSource.replace(
+  /^\/\*\*[\s\S]*?SPDX-License-Identifier: MIT\s*\*\/\s*/,
+  "",
+);
+await writeFile(
   "dist/flexpay-checkout.css",
+  `${banner}\n\n${cssWithoutSourceHeader}`,
+  "utf8",
 );

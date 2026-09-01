@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Config;
@@ -48,7 +56,7 @@ final class Services extends BaseService
         $config = config('FlexPayPackage');
         return new CheckoutManager(
             static::flexPay(),
-            new CodeIgniterCheckoutStore(db_connect()),
+            static::flexPayCheckoutStore(),
             service('logger'),
             new CheckoutConfiguration(
                 allowedCheckoutHosts: $config->allowedCheckoutHosts,
@@ -59,5 +67,14 @@ final class Services extends BaseService
                 statusMinimumRefreshSeconds: (int) env('FLEXPAY_STATUS_MIN_REFRESH_SECONDS', 4)
             )
         );
+    }
+
+    public static function flexPayCheckoutStore(bool $getShared = true): CodeIgniterCheckoutStore
+    {
+        if ($getShared) {
+            return static::getSharedInstance('flexPayCheckoutStore');
+        }
+
+        return new CodeIgniterCheckoutStore(db_connect());
     }
 }

@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace App\Http\Controllers;
@@ -33,7 +41,8 @@ final class FlexPayCheckoutController extends Controller
             merchantReference: $order->reference,
             amount: (float) $order->total_amount,
             currency: $order->currency,
-            allowedMethods: [PaymentMethod::MOBILE_MONEY, PaymentMethod::CARD],
+            // La carte n’est ajoutée qu’après injection d’un adaptateur hébergé confirmé.
+            allowedMethods: [PaymentMethod::MOBILE_MONEY],
             successUrl: route('flexpay.result'),
             cancelUrl: route('flexpay.cancel'),
             callbackUrl: route('flexpay.callback'),

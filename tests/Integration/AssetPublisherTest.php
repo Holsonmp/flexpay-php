@@ -63,4 +63,26 @@ final class AssetPublisherTest extends TestCase
 
         self::assertNotSame('old', file_get_contents($this->targetDirectory . '/flexpay-checkout.css'));
     }
+
+    public function testForceRejectsDestinationSymlinkWithoutChangingItsTarget(): void
+    {
+        if (!function_exists('symlink')) {
+            self::markTestSkipped('Les liens symboliques ne sont pas disponibles.');
+        }
+
+        mkdir($this->targetDirectory, 0775, true);
+        $sentinel = sys_get_temp_dir() . '/flexpay-assets-sentinel-' . bin2hex(random_bytes(6));
+        file_put_contents($sentinel, 'unchanged');
+        symlink($sentinel, $this->targetDirectory . '/flexpay-checkout.css');
+
+        try {
+            (new AssetPublisher())->publish($this->targetDirectory, true);
+            self::fail('La publication devait refuser le lien symbolique.');
+        } catch (RuntimeException) {
+            self::assertSame('unchanged', file_get_contents($sentinel));
+        } finally {
+            @unlink($this->targetDirectory . '/flexpay-checkout.css');
+            @unlink($sentinel);
+        }
+    }
 }

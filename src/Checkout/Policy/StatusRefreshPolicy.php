@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Checkout\Policy;
@@ -19,7 +27,34 @@ final class StatusRefreshPolicy
         DateTimeImmutable $now,
         bool $force = false
     ): bool {
-        if ($session->normalizedStatus()->isFinal() || $session->providerTransactionId() === null) {
+        if (
+            $session->normalizedStatus()->isFinal()
+            || ($session->providerTransactionId() === null && $session->providerTransactionCandidate() === null)
+        ) {
+            return false;
+        }
+        if ($force || $session->lastProviderRefreshAt() === null) {
+            return true;
+        }
+
+        return $now->getTimestamp() - $session->lastProviderRefreshAt()->getTimestamp()
+            >= $this->configuration->statusMinimumRefreshSeconds;
+    }
+
+    public function shouldRefreshCandidate(
+        CheckoutSession $session,
+        DateTimeImmutable $now,
+        ?string $providerTransactionIdCandidate,
+        bool $force = false
+    ): bool {
+        if ($session->providerTransactionId() !== null) {
+            return $this->shouldRefresh($session, $now, $force);
+        }
+        if (
+            $providerTransactionIdCandidate === null
+            || trim($providerTransactionIdCandidate) === ''
+            || $session->normalizedStatus()->isFinal()
+        ) {
             return false;
         }
         if ($force || $session->lastProviderRefreshAt() === null) {

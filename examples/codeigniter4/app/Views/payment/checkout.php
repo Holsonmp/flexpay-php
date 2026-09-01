@@ -1,3 +1,16 @@
+<?php
+
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+declare(strict_types=1);
+?>
+
 <link rel="stylesheet" href="<?= base_url('vendor/flexpay/flexpay-checkout.css') ?>">
 
 <button

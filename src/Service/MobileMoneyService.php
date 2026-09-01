@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 namespace Holduix\FlexPay\Service;
@@ -59,18 +67,39 @@ final class MobileMoneyService
             'Provider_reference',
             'transaction_id',
         ]);
-        $acceptedStatus = $mapping->normalizedStatus === NormalizedPaymentStatus::SUCCESSFUL
-            || $mapping->normalizedStatus->isPending();
+        $merchantReference = $this->extractor->firstScalar($raw, [
+            'merchant_reference',
+            'merchantReference',
+            'MerchantReference',
+            'reference',
+            'Reference',
+        ]) ?? '';
+        $rawAmount = $this->extractor->firstScalar($raw, ['amount', 'amountCustomer']);
+        $amount = is_numeric($rawAmount) ? (float) $rawAmount : 0.0;
+        $responseCurrency = strtoupper($this->extractor->firstScalar($raw, ['currency']) ?? '');
+        $completeSuccessfulConfirmation = $providerReference !== null
+            && $merchantReference !== ''
+            && hash_equals(trim($request->merchantReference), $merchantReference)
+            && $amount > 0
+            && abs($amount - $request->amount) <= 0.00001
+            && $responseCurrency !== ''
+            && hash_equals($currency, $responseCurrency);
+        $normalizedStatus = $mapping->normalizedStatus === NormalizedPaymentStatus::SUCCESSFUL
+            && !$completeSuccessfulConfirmation
+                ? NormalizedPaymentStatus::UNKNOWN
+                : $mapping->normalizedStatus;
+        $acceptedStatus = $normalizedStatus->isPending()
+            || ($normalizedStatus === NormalizedPaymentStatus::SUCCESSFUL && $completeSuccessfulConfirmation);
 
         return new MobileMoneyPaymentResult(
             accepted: $acceptedStatus && $providerReference !== null,
-            normalizedStatus: $mapping->normalizedStatus,
+            normalizedStatus: $normalizedStatus,
             rawStatus: $mapping->rawStatus,
             rawResponse: $this->redactor->redact($raw),
-            transactionReference: trim($request->merchantReference),
+            transactionReference: $merchantReference,
             providerTransactionId: $providerReference,
-            amount: $request->amount,
-            currency: $currency,
+            amount: $amount,
+            currency: $responseCurrency,
             message: $this->extractor->firstScalar($raw, ['message', 'messsage']),
             occurredAt: $this->extractor->firstScalar($raw, ['occurredAt', 'createdAt', 'created_at'])
         );

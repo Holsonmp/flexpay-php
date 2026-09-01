@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * FlexPay Intégration By Holsonmp - Holduix
+ *
+ * Copyright (c) 2026 Holson Mpangala (Holsonmp) / Holduix
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 declare(strict_types=1);
 
 return [
@@ -8,9 +16,6 @@ return [
     'merchant_id' => env('FLEXPAY_MERCHANT'),
     'api_token' => env('FLEXPAY_TOKEN'),
     'callback_token' => env('FLEXPAY_CALLBACK_TOKEN', ''),
-    'driver' => env('FLEXPAY_DRIVER', 'legacy'),
-    'checkout_ui' => env('FLEXPAY_CHECKOUT_UI', 'legacy'),
-    'allow_package_in_production' => env('FLEXPAY_ALLOW_PACKAGE_IN_PRODUCTION', false),
     'allowed_checkout_hosts' => array_values(array_filter(array_map(
         'trim',
         explode(',', env('FLEXPAY_CARD_ALLOWED_CHECKOUT_HOSTS', 'cardpayment.flexpay.cd'))

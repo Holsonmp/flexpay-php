@@ -13,6 +13,7 @@ use Holduix\FlexPay\Checkout\DTO\InitializeCheckoutRequest;
 use Holduix\FlexPay\Checkout\DTO\RefreshCheckoutStatusRequest;
 use Holduix\FlexPay\Checkout\Exception\CheckoutConflictException;
 use Holduix\FlexPay\Checkout\Support\InMemoryCheckoutStore;
+use Holduix\FlexPay\Config\CheckoutConfiguration;
 use Holduix\FlexPay\Enum\PaymentMethod;
 use Holduix\FlexPay\Exception\NetworkException;
 use Holduix\FlexPay\Tests\Support\ClientFactory;
@@ -27,11 +28,18 @@ final class CheckoutManagerTest extends TestCase
 {
     public function testMobileMoneyFlowPendingThenSuccessfulAndStopsAtTerminal(): void
     {
+        $success = json_encode([
+            'merchant_reference' => 'ORDER-2026-0001',
+            'orderNumber' => 'FAKE-MM-ORDER-2026-0001',
+            'status' => 'success',
+            'amount' => 50,
+            'currency' => 'USD',
+        ], JSON_THROW_ON_ERROR);
         $http = new FakeHttpClient([
             $this->responseFixture('mobile-money/initiation-pending.json'),
             $this->responseFixture('mobile-money/initiation-pending.json'),
             $this->responseFixture('mobile-money/initiation-pending.json'),
-            $this->responseFixture('mobile-money/payment-success.json'),
+            new Response(200, ['Content-Type' => 'application/json'], $success),
         ]);
         [$manager, $store, $listener] = $this->manager($http);
         $session = $manager->create($this->createRequest());
@@ -102,7 +110,8 @@ final class CheckoutManagerTest extends TestCase
         self::assertSame('redirect', $initialized->action->type->value);
         self::assertNotNull($persisted);
         self::assertSame(CheckoutState::REDIRECTING, $persisted->state());
-        self::assertNotNull($persisted->checkoutUrl());
+        self::assertNull($persisted->checkoutUrl());
+        self::assertArrayNotHasKey('checkout_url', $persisted->toStorageArray());
 
         $verified = $manager->handleReturn(new HandleCheckoutReturnRequest(
             $session->id(),
@@ -121,7 +130,10 @@ final class CheckoutManagerTest extends TestCase
             'currency' => 'USD',
         ], JSON_THROW_ON_ERROR);
         $http = new FakeHttpClient([new Response(200, ['Content-Type' => 'application/json'], $success)]);
-        [$manager] = $this->manager($http);
+        [$manager] = $this->manager(
+            $http,
+            new CheckoutConfiguration(statusMinimumRefreshSeconds: 0)
+        );
         $session = $manager->create($this->createRequest());
         $manager->initialize(new InitializeCheckoutRequest($session->id(), PaymentMethod::CARD));
         $body = json_encode([
@@ -131,7 +143,7 @@ final class CheckoutManagerTest extends TestCase
             'amount' => 50,
             'currency' => 'USD',
         ], JSON_THROW_ON_ERROR);
-        $request = new HandleCheckoutCallbackRequest([], $body);
+        $request = new HandleCheckoutCallbackRequest(self::callbackHeaders(), $body);
 
         $first = $manager->handleCallback($request);
         $second = $manager->handleCallback($request);
@@ -141,6 +153,44 @@ final class CheckoutManagerTest extends TestCase
         self::assertTrue($second->idempotent);
         self::assertTrue($returned->idempotent);
         self::assertCount(1, $http->requests);
+    }
+
+    public function testSemanticallyIdenticalCallbackWithExtraFieldsIsIdempotent(): void
+    {
+        $success = json_encode([
+            'merchant_reference' => 'ORDER-2026-0001',
+            'orderNumber' => 'CARD-SEMANTIC-1',
+            'status' => 'success',
+            'amount' => 50,
+            'currency' => 'USD',
+        ], JSON_THROW_ON_ERROR);
+        $http = new FakeHttpClient([new Response(200, ['Content-Type' => 'application/json'], $success)]);
+        [$manager, , $listener] = $this->manager($http);
+        $session = $manager->create($this->createRequest());
+        $manager->initialize(new InitializeCheckoutRequest($session->id(), PaymentMethod::CARD));
+        $base = [
+            'merchant_reference' => 'ORDER-2026-0001',
+            'orderNumber' => 'CARD-SEMANTIC-1',
+            'status' => 'pending',
+            'amount' => 50,
+            'currency' => 'USD',
+        ];
+
+        $manager->handleCallback(new HandleCheckoutCallbackRequest(
+            self::callbackHeaders(),
+            json_encode($base, JSON_THROW_ON_ERROR)
+        ));
+        $duplicate = $manager->handleCallback(new HandleCheckoutCallbackRequest(
+            self::callbackHeaders(),
+            json_encode(['untrusted_extra' => bin2hex(random_bytes(8))] + $base, JSON_THROW_ON_ERROR)
+        ));
+
+        self::assertTrue($duplicate->idempotent);
+        self::assertCount(1, $http->requests);
+        self::assertCount(1, array_filter(
+            $listener->events,
+            static fn ($event): bool => $event->name === 'PaymentSucceeded'
+        ));
     }
 
     public function testNetworkErrorsNeverBecomeFailedAndEventuallyBecomeUnknown(): void
@@ -172,6 +222,115 @@ final class CheckoutManagerTest extends TestCase
         self::assertSame(CheckoutState::UNKNOWN, $store->findById($session->id())?->state());
     }
 
+    public function testUnverifiedCallbackCandidateSurvivesNetworkFailureAndThrottle(): void
+    {
+        $factory = new Psr17Factory();
+        $networkRequest = $factory->createRequest('GET', 'https://backend.flexpay.cd/status');
+        $success = json_encode([
+            'merchant_reference' => 'ORDER-2026-0001',
+            'orderNumber' => 'CARD-RETRY-1',
+            'status' => 'success',
+            'amount' => 50,
+            'currency' => 'USD',
+        ], JSON_THROW_ON_ERROR);
+        $http = new FakeHttpClient([
+            new TestNetworkException('offline', $networkRequest),
+            new Response(200, ['Content-Type' => 'application/json'], $success),
+        ]);
+        $store = new InMemoryCheckoutStore();
+        $now = new \DateTimeImmutable('2026-08-31T12:00:00+00:00');
+        $manager = new CheckoutManager(
+            ClientFactory::create($http),
+            $store,
+            configuration: new CheckoutConfiguration(statusMinimumRefreshSeconds: 4),
+            clock: static function () use (&$now): \DateTimeImmutable {
+                return $now;
+            }
+        );
+        $session = $manager->create($this->createRequest());
+        $manager->initialize(new InitializeCheckoutRequest($session->id(), PaymentMethod::CARD));
+        $body = json_encode([
+            'merchant_reference' => 'ORDER-2026-0001',
+            'orderNumber' => 'CARD-RETRY-1',
+            'status' => 'pending',
+            'amount' => 50,
+            'currency' => 'USD',
+        ], JSON_THROW_ON_ERROR);
+        $callback = new HandleCheckoutCallbackRequest(self::callbackHeaders(), $body);
+
+        try {
+            $manager->handleCallback($callback);
+            self::fail('La première vérification devait signaler l’erreur réseau.');
+        } catch (NetworkException) {
+            $stored = $store->findById($session->id());
+            self::assertNotNull($stored);
+            self::assertNull($stored->providerTransactionId());
+            self::assertSame('CARD-RETRY-1', $stored->providerTransactionCandidate());
+        }
+
+        $throttled = $manager->handleCallback($callback);
+        self::assertFalse($throttled->idempotent);
+        self::assertCount(1, $http->requests);
+
+        $now = $now->modify('+5 seconds');
+        $verified = $manager->handleCallback($callback);
+        $duplicate = $manager->handleCallback($callback);
+
+        self::assertSame('successful', $verified->checkout->status);
+        self::assertTrue($duplicate->idempotent);
+        self::assertCount(2, $http->requests);
+    }
+
+    public function testProviderResponseIdentifierMustMatchTheQueriedCandidate(): void
+    {
+        $body = json_encode([
+            'merchant_reference' => 'ORDER-2026-0001',
+            'orderNumber' => 'OTHER-PROVIDER-ID',
+            'status' => 'success',
+            'amount' => 50,
+            'currency' => 'USD',
+        ], JSON_THROW_ON_ERROR);
+        $http = new FakeHttpClient([new Response(200, ['Content-Type' => 'application/json'], $body)]);
+        [$manager, $store] = $this->manager($http);
+        $session = $manager->create($this->createRequest());
+        $manager->initialize(new InitializeCheckoutRequest($session->id(), PaymentMethod::CARD));
+
+        $this->expectException(CheckoutConflictException::class);
+        try {
+            $manager->handleReturn(new HandleCheckoutReturnRequest(
+                $session->id(),
+                ['orderNumber' => 'QUERIED-PROVIDER-ID']
+            ));
+        } finally {
+            self::assertNull($store->findById($session->id())?->providerTransactionId());
+        }
+    }
+
+    public function testSparseSuccessfulCallbackNeverConfirmsPayment(): void
+    {
+        $http = new FakeHttpClient([new Response(
+            200,
+            ['Content-Type' => 'application/json'],
+            '{"status":"success","orderNumber":"CARD-SPARSE-CALLBACK"}'
+        )]);
+        [$manager, $store] = $this->manager($http);
+        $session = $manager->create($this->createRequest());
+        $manager->initialize(new InitializeCheckoutRequest($session->id(), PaymentMethod::CARD));
+        $callback = json_encode([
+            'merchant_reference' => 'ORDER-2026-0001',
+            'orderNumber' => 'CARD-SPARSE-CALLBACK',
+            'status' => 'success',
+            'amount' => 50,
+            'currency' => 'USD',
+        ], JSON_THROW_ON_ERROR);
+
+        $result = $manager->handleCallback(new HandleCheckoutCallbackRequest(self::callbackHeaders(), $callback));
+
+        self::assertFalse($result->checkout->terminal);
+        self::assertNotSame('successful', $result->checkout->status);
+        self::assertNull($store->findById($session->id())?->providerTransactionId());
+    }
+
     public function testCallbackAmountMismatchCannotConfirmPayment(): void
     {
         $http = new FakeHttpClient([]);
@@ -187,7 +346,7 @@ final class CheckoutManagerTest extends TestCase
         ], JSON_THROW_ON_ERROR);
 
         $this->expectException(CheckoutConflictException::class);
-        $manager->handleCallback(new HandleCheckoutCallbackRequest([], $body));
+        $manager->handleCallback(new HandleCheckoutCallbackRequest(self::callbackHeaders(), $body));
     }
 
     public function testReturnBeforeCallbackCanRemainPendingThenBecomeSuccessful(): void
@@ -210,7 +369,10 @@ final class CheckoutManagerTest extends TestCase
             new Response(200, ['Content-Type' => 'application/json'], $pending),
             new Response(200, ['Content-Type' => 'application/json'], $success),
         ]);
-        [$manager] = $this->manager($http);
+        [$manager] = $this->manager(
+            $http,
+            new CheckoutConfiguration(statusMinimumRefreshSeconds: 0)
+        );
         $session = $manager->create($this->createRequest());
         $manager->initialize(new InitializeCheckoutRequest($session->id(), PaymentMethod::CARD));
 
@@ -228,7 +390,7 @@ final class CheckoutManagerTest extends TestCase
             'amount' => 50,
             'currency' => 'USD',
         ], JSON_THROW_ON_ERROR);
-        $verified = $manager->handleCallback(new HandleCheckoutCallbackRequest([], $callback));
+        $verified = $manager->handleCallback(new HandleCheckoutCallbackRequest(self::callbackHeaders(), $callback));
         self::assertSame('successful', $verified->checkout->status);
     }
 
@@ -279,7 +441,7 @@ final class CheckoutManagerTest extends TestCase
             'amount' => 50,
             'currency' => 'USD',
         ], JSON_THROW_ON_ERROR);
-        $result = $manager->handleCallback(new HandleCheckoutCallbackRequest([], $contradictory));
+        $result = $manager->handleCallback(new HandleCheckoutCallbackRequest(self::callbackHeaders(), $contradictory));
 
         self::assertSame('successful', $result->checkout->status);
         self::assertCount(1, array_filter(
@@ -306,12 +468,23 @@ final class CheckoutManagerTest extends TestCase
     }
 
     /** @return array{CheckoutManager, InMemoryCheckoutStore, RecordingCheckoutListener} */
-    private function manager(FakeHttpClient $http): array
-    {
+    private function manager(
+        FakeHttpClient $http,
+        ?CheckoutConfiguration $configuration = null
+    ): array {
         $store = new InMemoryCheckoutStore();
         $listener = new RecordingCheckoutListener();
 
-        return [new CheckoutManager(ClientFactory::create($http), $store, eventListener: $listener), $store, $listener];
+        return [
+            new CheckoutManager(
+                ClientFactory::create($http),
+                $store,
+                configuration: $configuration,
+                eventListener: $listener
+            ),
+            $store,
+            $listener,
+        ];
     }
 
     /** @param list<PaymentMethod>|null $allowedMethods */
@@ -336,5 +509,11 @@ final class CheckoutManagerTest extends TestCase
         self::assertIsString($fixture);
 
         return new Response(200, ['Content-Type' => 'application/json'], $fixture);
+    }
+
+    /** @return array<string, string> */
+    private static function callbackHeaders(): array
+    {
+        return ['X-FlexPay-Callback-Token' => 'callback-test'];
     }
 }
